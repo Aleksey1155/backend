@@ -7,10 +7,10 @@ const app = express()
 // connect to db
 
 const db = mysql.createConnection({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database : "test"
+    host: "sql201.infinityfree.com",
+    user: "if0_35742398",
+    password: "KuP13847138",
+    database : "if0_35742398_fullstack"
 })
 
 app.use(express.json())
