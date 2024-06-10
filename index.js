@@ -77,6 +77,6 @@ app.put("/books/:id", (req, res)=>{
 
 
 app.listen(3001, ()=>{
-    console.log('Connecte to backend!');
+    console.log('Connect to backend!');
 
 } )
