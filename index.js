@@ -1,3 +1,4 @@
+//file index.js
 import express from "express";
 import mysql from "mysql";
 import cors from "cors";
@@ -21,6 +22,14 @@ app.get("/", (req, res) => {
 
 app.get("/books", (req, res) => {
     const q = "SELECT * FROM books";
+    db.query(q, (err, data) => {
+        if (err) return res.json(err);
+        return res.json(data);
+    });
+});
+
+app.get("/users", (req, res) => {
+    const q = "SELECT * FROM users";
     db.query(q, (err, data) => {
         if (err) return res.json(err);
         return res.json(data);
@@ -64,6 +73,23 @@ app.put("/books/:id", (req, res) => {
         return res.json("Book has been updated");
     });
 });
+
+
+app.get("/data/:table", (req, res) => {
+    const tableName = req.params.table;
+    console.log(`Fetching data from table: ${tableName}`); // Логування імені таблиці
+    const q = `SELECT * FROM ??`;
+    db.query(q, [tableName], (err, data) => {
+        if (err) {
+            console.error(err); // Логування помилок
+            return res.status(500).json(err); // Зміна статусу на 500 для внутрішніх помилок
+        }
+        console.log(data); // Логування отриманих даних
+        return res.json(data);
+    });
+});
+
+
 
 // Function to handle database disconnection and reconnection
 const handleDisconnect = () => {
