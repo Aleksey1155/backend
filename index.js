@@ -1,7 +1,8 @@
 //file index.js
-import express from "express";
-import mysql from "mysql";
-import cors from "cors";
+const path = require('path');
+const express = require('express');
+const mysql = require('mysql');
+const cors = require('cors');
 
 const app = express();
 
@@ -15,6 +16,12 @@ const db = mysql.createPool({
 
 app.use(express.json());
 app.use(cors());
+app.use(express.static(path.join(__dirname, 'build')));
+
+app.get('/*', function (req, res) {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+});
+
 
 app.get("/", (req, res) => {
     res.json("hello");
