@@ -1,8 +1,8 @@
 //file index.js
-const path = require('path');
-const express = require('express');
-const mysql = require('mysql');
-const cors = require('cors');
+import express from "express";
+import mysql from "mysql";
+import cors from "cors";
+
 
 const app = express();
 
@@ -16,11 +16,7 @@ const db = mysql.createPool({
 
 app.use(express.json());
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'build')));
 
-app.get('/*', function (req, res) {
-  res.sendFile(path.join(__dirname, 'build', 'index.html'));
-});
 
 
 app.get("/", (req, res) => {
@@ -82,19 +78,6 @@ app.put("/books/:id", (req, res) => {
 });
 
 
-app.get("/data/:table", (req, res) => {
-    const tableName = req.params.table;
-    console.log(`Fetching data from table: ${tableName}`); // Логування імені таблиці
-    const q = `SELECT * FROM ??`;
-    db.query(q, [tableName], (err, data) => {
-        if (err) {
-            console.error(err); // Логування помилок
-            return res.status(500).json(err); // Зміна статусу на 500 для внутрішніх помилок
-        }
-        console.log(data); // Логування отриманих даних
-        return res.json(data);
-    });
-});
 
 
 
