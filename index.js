@@ -11,7 +11,7 @@ const db = mysql.createConnection({
     host: "localhost",
     user: "root",
     password: "",
-    database : "test"
+    database : "project_management"
 })
 
 app.use(express.json())
@@ -22,27 +22,27 @@ app.get("/", (req, res)=> {
 })
 
 
-app.get("/books", (req, res)=>{
-    const q = "SELECT * FROM books"
+app.get("/projects", (req, res)=>{
+    const q = "SELECT * FROM projects"
     db.query(q, (err, data)=>{
         if(err) return res.json(err)
             return res.json(data)
     })
 })
 
-app.post("/books", (req, res)=>{
+app.post("/projects", (req, res)=>{
 
-    const q = "INSERT INTO books (`title`, `descr`, `price`, `cover`) VALUES (?)"
+    const q = "INSERT INTO projects (`title`, `description`, `status`) VALUES (?)"
     
     const values = [
         req.body.title,
-        req.body.descr,
-        req.body.price,
-        req.body.cover,
+        req.body.description,
+        req.body.status,
+       
     ]
     db.query(q, [values], (err, data)=>{
         if(err) return res.json(err);
-            return res.json("Book has been created");
+            return res.json("Project has been created");
     });
 
 });
