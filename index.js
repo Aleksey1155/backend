@@ -32,11 +32,13 @@ app.get("/projects", (req, res)=>{
 
 app.post("/projects", (req, res)=>{
 
-    const q = "INSERT INTO projects (`title`, `description`, `status`) VALUES (?)"
+    const q = "INSERT INTO projects (`title`, `description`, `start_date`, `end_date`, `status`) VALUES (?)"
     
     const values = [
         req.body.title,
         req.body.description,
+        req.body.start_date,
+        req.body.end_date,
         req.body.status,
        
     ]
@@ -47,32 +49,33 @@ app.post("/projects", (req, res)=>{
 
 });
 
-app.delete("/books/:id", (req, res)=>{
-    const bookId = req.params.id;
-    const q = "DELETE FROM books WHERE id = ?"
+app.delete("/projects/:id", (req, res)=>{
+    const projectId = req.params.id;
+    const q = "DELETE FROM projects WHERE id = ?"
 
-    db.query(q, [bookId], (err, data)=>{
+    db.query(q, [projectId], (err, data)=>{
         if(err) return res.json(err);
-            return res.json("Book has been deleted");
+            return res.json("Project has been deleted");
     });
 })
 
-app.put("/books/:id", (req, res)=>{
-    const bookId = req.params.id;
-    const q = "UPDATE books SET `title` = ?, `descr`=?, `price`=?, `cover`=? WHERE id =?"
+app.put("/projects/:id", (req, res)=>{
+    const projectId = req.params.id;
+    const q = "UPDATE projects SET `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `status`=? WHERE id =?"
     
 
 
     const values = [
         req.body.title,
-        req.body.descr,
-        req.body.price,
-        req.body.cover,
+        req.body.description,
+        req.body.start_date,
+        req.body.end_date,
+        req.body.status,
     ]
 
-    db.query(q, [...values, bookId], (err, data)=>{
+    db.query(q, [...values, projectId], (err, data)=>{
         if(err) return res.json(err);
-            return res.json("Book has been update");
+            return res.json("Projects has been update");
     });
 })
 
