@@ -7,6 +7,8 @@ import cors from "cors"
 
 const app = express()
 
+//---------------------- DB Connection   -----------------------------------
+
 const db = mysql.createConnection({
     host: "localhost",
     user: "root",
@@ -22,6 +24,8 @@ app.get("/", (req, res)=> {
 })
 
 
+// --------------------       PROJECTS    -------------------------------------
+
 app.get("/projects", (req, res)=>{
     const q = "SELECT * FROM projects"
     db.query(q, (err, data)=>{
@@ -29,6 +33,8 @@ app.get("/projects", (req, res)=>{
             return res.json(data)
     })
 })
+
+
 
 app.post("/projects", (req, res)=>{
 
@@ -78,6 +84,214 @@ app.put("/projects/:id", (req, res)=>{
             return res.json("Projects has been update");
     });
 })
+
+
+// --------------------       TASKS     -------------------------------------
+
+app.get("/tasks", (req, res)=>{
+    const q = "SELECT * FROM tasks"
+    db.query(q, (err, data)=>{
+        if(err) return res.json(err)
+            return res.json(data)
+    })
+})
+
+app.post("/tasks", (req, res)=>{
+
+    const q = "INSERT INTO tasks (`project_id`, `title`, `description`, `start_date`, `end_date`, `priority`, `status`) VALUES (?)"
+    
+    const values = [
+        req.body.project_id,
+        req.body.title,
+        req.body.description,
+        req.body.start_date,
+        req.body.end_date,
+        req.body.priority,
+        req.body.status,
+       
+    ]
+    db.query(q, [values], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("Task has been created");
+    });
+
+});
+
+app.delete("/tasks/:id", (req, res)=>{
+    const taskId = req.params.id;
+    const q = "DELETE FROM tasks WHERE id = ?"
+
+    db.query(q, [taskId], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("Task has been deleted");
+    });
+})
+
+app.put("/tasks/:id", (req, res)=>{
+    const taskId = req.params.id;
+    const q = "UPDATE tasks SET `project_id` = ?, `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `priority`=?, `status`=? WHERE id =?"
+    
+
+
+    const values = [
+        req.body.project_id,
+        req.body.title,
+        req.body.description,
+        req.body.start_date,
+        req.body.end_date,
+        req.body.priority,
+        req.body.status,
+    ]
+
+    db.query(q, [...values, taskId], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("Task has been update");
+    });
+})
+
+
+// ----------------------  USERS   --------------------------
+
+app.get("/users", (req, res)=>{
+    const q = "SELECT * FROM users"
+    db.query(q, (err, data)=>{
+        if(err) return res.json(err)
+            return res.json(data)
+    })
+})
+
+app.post("/users", (req, res)=>{
+
+    const q = "INSERT INTO users (`email`, `name`, `phone`) VALUES (?)"
+    
+    const values = [
+        req.body.email,
+        req.body.name,
+        req.body.phone,
+       
+    ]
+    db.query(q, [values], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("User has been created");
+    });
+
+});
+
+app.delete("/users/:id", (req, res)=>{
+    const userId = req.params.id;
+    const q = "DELETE FROM users WHERE id = ?"
+
+    db.query(q, [userId], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("User has been deleted");
+    });
+})
+
+app.put("/users/:id", (req, res)=>{
+    const userId = req.params.id;
+    const q = "UPDATE users SET `email` = ?, `name` = ?, `phone`=? WHERE id =?"
+    
+
+
+    const values = [
+        req.body.email,
+        req.body.name,
+        req.body.phone,
+    ]
+
+    db.query(q, [...values, userId], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("User has been update");
+    });
+})
+
+
+
+//------------------------   ASSIGNMENTS  ---------------------------
+
+app.get("/assignments", (req, res)=>{
+    const q = "SELECT * FROM assignments"
+    db.query(q, (err, data)=>{
+        if(err) return res.json(err)
+            return res.json(data)
+    })
+})
+
+
+app.post("/assignments", (req, res)=>{
+
+    const q = "INSERT INTO assignments (`task_id`, `user_id`, `assigned_date`) VALUES (?)"
+    
+    const values = [
+        req.body.task_id,
+        req.body.user_id,
+        req.body.assigned_date,
+       
+    ]
+    db.query(q, [values], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("Assignments has been created");
+    });
+
+});
+
+app.delete("/assignments/:id", (req, res)=>{
+    const assignmentId = req.params.id;
+    const q = "DELETE FROM assignments WHERE id = ?"
+
+    db.query(q, [assignmentId], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("Assignments has been deleted");
+    });
+})
+
+app.put("/assignments/:id", (req, res)=>{
+    const assignmentId = req.params.id;
+    const q = "UPDATE assignments SET `task_id` = ?, `user_id` = ?, `assigned_date`=? WHERE id =?"
+    
+
+
+    const values = [
+        req.body.task_id,
+        req.body.user_id,
+        req.body.assigned_date,
+    ]
+
+    db.query(q, [...values, assignmentId], (err, data)=>{
+        if(err) return res.json(err);
+            return res.json("Assignments has been update");
+    });
+})
+
+//-------------------------------   dashboard   ------------------------------
+
+// Додайте новий маршрут для дашборду
+app.get("/dashboard", (req, res) => {
+    const q = `
+        SELECT 
+            tasks.title AS task_title, 
+            projects.title AS project_title, 
+            users.name AS user_name, 
+            assignments.assigned_date, 
+            tasks.start_date, 
+            tasks.end_date, 
+            tasks.status AS task_status, 
+            projects.status AS project_status 
+        FROM 
+            tasks 
+        JOIN 
+            projects ON tasks.project_id = projects.id 
+        JOIN 
+            assignments ON tasks.id = assignments.task_id 
+        JOIN 
+            users ON assignments.user_id = users.id
+    `;
+    db.query(q, (err, data) => {
+        if (err) return res.json(err);
+        return res.json(data);
+    });
+});
+
 
 
 app.listen(3001, ()=>{
