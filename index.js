@@ -42,6 +42,33 @@ app.get("/projects", (req, res) => {
     });
 });
 
+app.get("/projects/:id", (req, res) => {
+    const projectId = req.params.id;
+    const q = `
+        SELECT 
+            projects.*,  
+            project_statuses.status_name AS status_name 
+        FROM 
+            projects 
+        JOIN 
+            project_statuses ON projects.status_id = project_statuses.id
+        WHERE projects.id = ?
+    `;
+    db.query(q, [projectId], (err, data) => {
+        if (err) return res.json(err);
+        if (data.length === 0) return res.status(404).json({ message: "Project not found" });
+        return res.json(data[0]);
+    });
+});
+
+
+app.get("/project_statuses", (req, res) => {
+    const q = "SELECT * FROM project_statuses";
+    db.query(q, (err, data) => {
+        if (err) return res.json(err);
+        return res.json(data);
+    });
+});
 
 
 
