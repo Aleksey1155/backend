@@ -26,26 +26,35 @@ app.get("/", (req, res)=> {
 
 // --------------------       PROJECTS    -------------------------------------
 
-app.get("/projects", (req, res)=>{
-    const q = "SELECT * FROM projects"
-    db.query(q, (err, data)=>{
-        if(err) return res.json(err)
-            return res.json(data)
-    })
-})
+app.get("/projects", (req, res) => {
+    const q = `
+        SELECT 
+            projects.*,  
+            project_statuses.status_name AS status_name 
+        FROM 
+            projects 
+        JOIN 
+            project_statuses ON projects.status_id = project_statuses.id
+    `;
+    db.query(q, (err, data) => {
+        if (err) return res.json(err);
+        return res.json(data);
+    });
+});
+
 
 
 
 app.post("/projects", (req, res)=>{
 
-    const q = "INSERT INTO projects (`title`, `description`, `start_date`, `end_date`, `status`) VALUES (?)"
+    const q = "INSERT INTO projects (`title`, `description`, `start_date`, `end_date`, `status_id`) VALUES (?)"
     
     const values = [
         req.body.title,
         req.body.description,
         req.body.start_date,
         req.body.end_date,
-        req.body.status,
+        req.body.status_id,
        
     ]
     db.query(q, [values], (err, data)=>{
@@ -67,7 +76,7 @@ app.delete("/projects/:id", (req, res)=>{
 
 app.put("/projects/:id", (req, res)=>{
     const projectId = req.params.id;
-    const q = "UPDATE projects SET `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `status`=? WHERE id =?"
+    const q = "UPDATE projects SET `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `status_id`=? WHERE id =?"
     
 
 
@@ -76,7 +85,7 @@ app.put("/projects/:id", (req, res)=>{
         req.body.description,
         req.body.start_date,
         req.body.end_date,
-        req.body.status,
+        req.body.status_id,
     ]
 
     db.query(q, [...values, projectId], (err, data)=>{
@@ -88,17 +97,27 @@ app.put("/projects/:id", (req, res)=>{
 
 // --------------------       TASKS     -------------------------------------
 
-app.get("/tasks", (req, res)=>{
-    const q = "SELECT * FROM tasks"
-    db.query(q, (err, data)=>{
-        if(err) return res.json(err)
-            return res.json(data)
-    })
-})
-
+app.get("/tasks", (req, res) => {
+    const q = `
+        SELECT 
+            tasks.*,  
+            task_statuses.status_name AS status_name, 
+            task_priorities.priority_name AS priority_name 
+        FROM 
+            tasks 
+        JOIN 
+            task_statuses ON tasks.status_id = task_statuses.id
+        JOIN 
+            task_priorities ON tasks.priority_id = task_priorities.id
+    `;
+    db.query(q, (err, data) => {
+        if (err) return res.json(err);
+        return res.json(data);
+    });
+});
 app.post("/tasks", (req, res)=>{
 
-    const q = "INSERT INTO tasks (`project_id`, `title`, `description`, `start_date`, `end_date`, `priority`, `status`) VALUES (?)"
+    const q = "INSERT INTO tasks (`project_id`, `title`, `description`, `start_date`, `end_date`, `priority_id`, `status_id`) VALUES (?)"
     
     const values = [
         req.body.project_id,
@@ -106,8 +125,8 @@ app.post("/tasks", (req, res)=>{
         req.body.description,
         req.body.start_date,
         req.body.end_date,
-        req.body.priority,
-        req.body.status,
+        req.body.priority_id,
+        req.body.status_id,
        
     ]
     db.query(q, [values], (err, data)=>{
@@ -129,7 +148,7 @@ app.delete("/tasks/:id", (req, res)=>{
 
 app.put("/tasks/:id", (req, res)=>{
     const taskId = req.params.id;
-    const q = "UPDATE tasks SET `project_id` = ?, `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `priority`=?, `status`=? WHERE id =?"
+    const q = "UPDATE tasks SET `project_id` = ?, `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `priority_id`=?, `status_id`=? WHERE id =?"
     
 
 
@@ -139,8 +158,8 @@ app.put("/tasks/:id", (req, res)=>{
         req.body.description,
         req.body.start_date,
         req.body.end_date,
-        req.body.priority,
-        req.body.status,
+        req.body.priority_id,
+        req.body.status_id,
     ]
 
     db.query(q, [...values, taskId], (err, data)=>{
@@ -153,7 +172,15 @@ app.put("/tasks/:id", (req, res)=>{
 // ----------------------  USERS   --------------------------
 
 app.get("/users", (req, res)=>{
-    const q = "SELECT * FROM users"
+    const q = `
+        SELECT 
+            users.*,
+            roles.name AS role_name 
+        FROM 
+            users 
+        JOIN 
+            roles ON users.role_id = roles.id
+    `;
     db.query(q, (err, data)=>{
         if(err) return res.json(err)
             return res.json(data)
@@ -162,12 +189,13 @@ app.get("/users", (req, res)=>{
 
 app.post("/users", (req, res)=>{
 
-    const q = "INSERT INTO users (`email`, `name`, `phone`) VALUES (?)"
+    const q = "INSERT INTO users (`email`, `name`, `phone`, `role_id`) VALUES (?)"
     
     const values = [
         req.body.email,
         req.body.name,
         req.body.phone,
+        req.body.role_id,
        
     ]
     db.query(q, [values], (err, data)=>{
@@ -189,7 +217,7 @@ app.delete("/users/:id", (req, res)=>{
 
 app.put("/users/:id", (req, res)=>{
     const userId = req.params.id;
-    const q = "UPDATE users SET `email` = ?, `name` = ?, `phone`=? WHERE id =?"
+    const q = "UPDATE users SET `email` = ?, `name` = ?, `phone`=?, `role_id`=? WHERE id =?"
     
 
 
@@ -197,6 +225,7 @@ app.put("/users/:id", (req, res)=>{
         req.body.email,
         req.body.name,
         req.body.phone,
+        req.body.role_id,
     ]
 
     db.query(q, [...values, userId], (err, data)=>{
@@ -210,7 +239,15 @@ app.put("/users/:id", (req, res)=>{
 //------------------------   ASSIGNMENTS  ---------------------------
 
 app.get("/assignments", (req, res)=>{
-    const q = "SELECT * FROM assignments"
+    const q = `
+        SELECT 
+            assignments.*,
+            users.name AS user_name 
+        FROM 
+            assignments 
+        JOIN 
+            users ON assignments.user_id = users.id
+    `;
     db.query(q, (err, data)=>{
         if(err) return res.json(err)
             return res.json(data)
@@ -269,22 +306,26 @@ app.put("/assignments/:id", (req, res)=>{
 app.get("/dashboard", (req, res) => {
     const q = `
         SELECT 
-            tasks.title AS task_title, 
-            projects.title AS project_title, 
-            users.name AS user_name, 
-            assignments.assigned_date, 
-            tasks.start_date, 
-            tasks.end_date, 
-            tasks.status AS task_status, 
-            projects.status AS project_status 
+            tasks.title AS task_title,
+            projects.title AS project_title,
+            users.name AS user_name,
+            assignments.assigned_date,
+            tasks.start_date,
+            tasks.end_date,
+            task_statuses.status_name AS task_status,
+            project_statuses.status_name AS project_status
         FROM 
-            tasks 
+            assignments
         JOIN 
-            projects ON tasks.project_id = projects.id 
+            tasks ON assignments.task_id = tasks.id
         JOIN 
-            assignments ON tasks.id = assignments.task_id 
+            projects ON tasks.project_id = projects.id
         JOIN 
             users ON assignments.user_id = users.id
+        JOIN 
+            task_statuses ON tasks.status_id = task_statuses.id
+        JOIN 
+            project_statuses ON projects.status_id = project_statuses.id
     `;
     db.query(q, (err, data) => {
         if (err) return res.json(err);
@@ -295,6 +336,6 @@ app.get("/dashboard", (req, res) => {
 
 
 app.listen(3001, ()=>{
-    console.log('Connecte to backend!');
+    console.log('Connect to backend!');
 
 } )
