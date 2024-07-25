@@ -1,3 +1,4 @@
+
 import express from "express";
 import mysql from "mysql";
 import cors from "cors";
@@ -12,10 +13,10 @@ const app = express();
 //---------------------- DB Connection   -----------------------------------
 
 const db = mysql.createConnection({
-    host: process.env.DBHOST,
-    user: process.env.DBUSER,
-    password: process.env.DBPASSWORD,
-    database: process.env.DBNAME
+    host: "sql.freedb.tech",
+    user: "freedb_kupoleg",
+    password: "ncvAw3Sx5FAY**q",
+    database : "freedb_project_management"
 });
 
 app.use(express.json());
@@ -433,7 +434,8 @@ app.get("/dashboard", (req, res) => {
             tasks.start_date,
             tasks.end_date,
             task_statuses.status_name AS task_status,
-            project_statuses.status_name AS project_status
+            project_statuses.status_name AS project_status,
+            users.id AS user_id
         FROM 
             assignments
         JOIN 
