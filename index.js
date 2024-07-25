@@ -37,6 +37,15 @@ const transporter = nodemailer.createTransport({
 
 // --------------------       PROJECTS    -------------------------------------
 
+
+app.get("/proj", (req, res)=>{
+    const q = "SELECT * FROM projects"
+    db.query(q, (err, data)=>{
+        if(err) return res.json(err)
+            return res.json(data)
+    })
+})
+
 app.get("/projects", (req, res) => {
     const q = `
         SELECT 
