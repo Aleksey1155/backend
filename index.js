@@ -13,10 +13,10 @@ const app = express();
 //---------------------- DB Connection   -----------------------------------
 
 const db = mysql.createConnection({
-    host: "sql7.freesqldatabase.com",
-    user: "sql7722156",
-    password: "hxhpm1gpUc",
-    database : "sql7722156"
+    host: "localhost",
+    user: "root",
+    password: "",
+    database : "project_management"
 });
 
 app.use(express.json());
@@ -287,12 +287,15 @@ app.get("/roles", (req, res) => {
 });
 
 app.post("/users", (req, res) => {
-    const q = "INSERT INTO users (`email`, `name`, `phone`, `role_id`) VALUES (?)";
+    const q = "INSERT INTO users (`email`,`password`, `name`, `phone`, `img`, `descr`, `role_id`) VALUES (?)";
     
     const values = [
         req.body.email,
+        req.body.password,
         req.body.name,
         req.body.phone,
+        req.body.img,
+        req.body.descr,
         req.body.role_id,
     ];
     db.query(q, [values], (err, data) => {
@@ -313,12 +316,15 @@ app.delete("/users/:id", (req, res) => {
 
 app.put("/users/:id", (req, res) => {
     const userId = req.params.id;
-    const q = "UPDATE users SET `email` = ?, `name` = ?, `phone`=?, `role_id`=? WHERE id =?";
+    const q = "UPDATE users SET `email` = ?, `password` = ?, `name` = ?,  `phone`=?,`img`=?,`descr`=?, `role_id`=? WHERE id =?";
     
     const values = [
         req.body.email,
+        req.body.password,
         req.body.name,
         req.body.phone,
+        req.body.img,
+        req.body.descr,
         req.body.role_id,
     ];
 
@@ -463,6 +469,36 @@ app.get("/dashboard", (req, res) => {
         return res.json(data);
     });
 });
+
+
+//-------------------------------    userdetails     ------------------------
+
+app.get("/userdetails/:id", (req, res) => {
+    const userId = req.params.id;
+    const q = `
+        SELECT 
+            users.id AS user_id,
+            users.name AS user_name,
+            tasks.title AS task_title,
+            tasks.start_date,
+            tasks.end_date
+        FROM 
+            users
+        JOIN 
+            assignments ON users.id = assignments.user_id
+        JOIN 
+            tasks ON assignments.task_id = tasks.id
+        WHERE 
+            users.id = ?
+    `;
+    db.query(q, [userId], (err, data) => {
+        if (err) return res.json(err);
+        if (data.length === 0) return res.status(404).json({ message: "No tasks found for this user" });
+        return res.json(data);
+    });
+});
+
+
 
 app.listen(3001, () => {
     console.log('Connected to backend!');
