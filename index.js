@@ -142,11 +142,15 @@ app.post("/projects", (req, res) => {
     req.body.end_date,
     req.body.status_id,
   ];
+
   db.query(q, [values], (err, data) => {
     if (err) return res.json(err);
-    return res.json("Project has been created");
+
+    // Повертаємо ID нового проекту
+    return res.json({ insertId: data.insertId });
   });
 });
+
 
 app.delete("/project_images/:id", (req, res) => {
   const imagesId = req.params.id;
@@ -191,42 +195,44 @@ app.put("/projects/:id", (req, res) => {
 
 
 app.post("/upload", (req, res) => {
-  if (!req.files) {
+  if (!req.files || !req.files.files) {
     return res.status(400).json({ msg: "No files uploaded" });
   }
 
-  const file = req.files.file;
-  if (!file) return res.json({ error: "Incorrect input name" });
+  const files = Array.isArray(req.files.files) ? req.files.files : [req.files.files];
+  const { project_id } = req.body;
 
-  const newFileName = encodeURI(Date.now() + `-` + file.name);
-  const filePath = `/images/${newFileName}`;
+  let uploadedFiles = [];
 
-  // Збереження файлу в файлову систему
-  file.mv(`${__dirname}/../client/public/images/${newFileName}`, (err) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).send(err);
-    }
+  files.forEach((file, index) => {
+    const newFileName = encodeURI(Date.now() + `-${index}-` + file.name);
+    const filePath = `/images/${newFileName}`;
 
-    // Отримання project_id з запиту
-    const { project_id } = req.body;
-
-    // SQL-запит для додавання URL зображення в таблицю project_images
-    const q = "INSERT INTO project_images (project_id, url) VALUES (?, ?)";
-    db.query(q, [project_id, filePath], (err, data) => {
+    file.mv(`${__dirname}/../client/public/images/${newFileName}`, (err) => {
       if (err) {
-        console.error("DB Error: ", err);
-        return res.status(500).json({ msg: "Failed to insert image into database" });
+        console.error(err);
+        return res.status(500).send(err);
       }
 
-      // Повернення успішного результату
-      res.json({
-        fileName: file.name,
-        filePath: filePath,
+      // SQL-запит для додавання URL зображення в таблицю project_images
+      const q = "INSERT INTO project_images (project_id, url) VALUES (?, ?)";
+      db.query(q, [project_id, filePath], (err, data) => {
+        if (err) {
+          console.error("DB Error: ", err);
+          return res.status(500).json({ msg: "Failed to insert image into database" });
+        }
+
+        uploadedFiles.push({ fileName: file.name, filePath });
+
+        if (uploadedFiles.length === files.length) {
+          // Повертаємо відповідь після завантаження всіх файлів
+          res.json({ uploadedFiles });
+        }
       });
     });
   });
 });
+
 
 // --------------------       TASKS     -------------------------------------
 
