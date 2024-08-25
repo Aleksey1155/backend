@@ -4,8 +4,13 @@ import cors from "cors";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import fileUpload from "express-fileupload";
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { dirname } from "path";
+import { fileURLToPath } from "url";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import multer from "multer";
+import cookieParser from "cookie-parser";
+import { register } from "./register/checkAuth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,7 +25,6 @@ app.use(
   })
 );
 
-
 app.use(express.json());
 app.use(cors());
 
@@ -32,7 +36,6 @@ const db = mysql.createConnection({
   password: "",
   database: "project_management",
 });
-
 
 // app.use(
 //   fileUpload({
@@ -151,7 +154,6 @@ app.post("/projects", (req, res) => {
   });
 });
 
-
 app.delete("/project_images/:id", (req, res) => {
   const imagesId = req.params.id;
   const q = "DELETE FROM project_images WHERE id = ?";
@@ -193,13 +195,14 @@ app.put("/projects/:id", (req, res) => {
 
 //--------------- !!! upload images !!! ------------------//
 
-
 app.post("/upload", (req, res) => {
   if (!req.files || !req.files.files) {
     return res.status(400).json({ msg: "No files uploaded" });
   }
 
-  const files = Array.isArray(req.files.files) ? req.files.files : [req.files.files];
+  const files = Array.isArray(req.files.files)
+    ? req.files.files
+    : [req.files.files];
   const { project_id } = req.body;
 
   let uploadedFiles = [];
@@ -219,7 +222,9 @@ app.post("/upload", (req, res) => {
       db.query(q, [project_id, filePath], (err, data) => {
         if (err) {
           console.error("DB Error: ", err);
-          return res.status(500).json({ msg: "Failed to insert image into database" });
+          return res
+            .status(500)
+            .json({ msg: "Failed to insert image into database" });
         }
 
         uploadedFiles.push({ fileName: file.name, filePath });
@@ -232,7 +237,6 @@ app.post("/upload", (req, res) => {
     });
   });
 });
-
 
 // --------------------       TASKS     -------------------------------------
 
@@ -393,10 +397,11 @@ app.get("/roles", (req, res) => {
 app.post("/users", (req, res) => {
   const q =
     "INSERT INTO users (`email`,`password`, `name`, `phone`, `img`, `descr`, `role_id`) VALUES (?)";
-
+  const salt = bcrypt.genSaltSync(10);
+  const hashedPassword = bcrypt.hashSync(req.body.password, salt);
   const values = [
     req.body.email,
-    req.body.password,
+    hashedPassword,
     req.body.name,
     req.body.phone,
     req.body.img,
@@ -421,12 +426,14 @@ app.delete("/users/:id", (req, res) => {
 
 app.put("/users/:id", (req, res) => {
   const userId = req.params.id;
+  const salt = bcrypt.genSaltSync(10);
+  const hashedPassword = bcrypt.hashSync(req.body.password, salt);
   const q =
     "UPDATE users SET `email` = ?, `password` = ?, `name` = ?,  `phone`=?,`img`=?,`descr`=?, `role_id`=? WHERE id =?";
 
   const values = [
     req.body.email,
-    req.body.password,
+    hashedPassword,
     req.body.name,
     req.body.phone,
     req.body.img,
@@ -465,6 +472,12 @@ app.get("/userdetails/:id", (req, res) => {
     return res.json(data);
   });
 });
+
+
+// Маршрут для перевірки унікальності
+app.post("/check-unique", register);
+
+
 
 //------------------------   ASSIGNMENTS  ---------------------------
 
