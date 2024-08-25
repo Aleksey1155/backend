@@ -426,14 +426,12 @@ app.delete("/users/:id", (req, res) => {
 
 app.put("/users/:id", (req, res) => {
   const userId = req.params.id;
-  const salt = bcrypt.genSaltSync(10);
-  const hashedPassword = bcrypt.hashSync(req.body.password, salt);
   const q =
     "UPDATE users SET `email` = ?, `password` = ?, `name` = ?,  `phone`=?,`img`=?,`descr`=?, `role_id`=? WHERE id =?";
 
   const values = [
     req.body.email,
-    hashedPassword,
+    req.body.password,
     req.body.name,
     req.body.phone,
     req.body.img,
@@ -474,7 +472,7 @@ app.get("/userdetails/:id", (req, res) => {
 });
 
 
-// Маршрут для перевірки унікальності
+// Маршрут для перевірки унікальності  Register page 
 app.post("/check-unique", register);
 
 
