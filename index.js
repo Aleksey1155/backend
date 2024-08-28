@@ -470,6 +470,84 @@ app.get("/userdetails/:id", (req, res) => {
     return res.json(data);
   });
 });
+//+++++++++  login  ++++++
+
+app.post("/login", (req, res) => {
+  const q = "SELECT * FROM users WHERE email = ?";
+  db.query(q, [req.body.email], (err, data) => {
+    if (err) return res.json(err);
+    if (data.length === 0) return res.status(404).json({ message: "Користувача не знайдено!" });
+
+    const isPasswordCorrect = bcrypt.compareSync(req.body.password, data[0].password);
+    
+    if (!isPasswordCorrect) return res.status(400).json({ message: "Неправильний пароль!" });
+
+    // Створення JWT токену
+    const token = jwt.sign(
+      { id: data[0].id, email: data[0].email },
+      "secretkey", // Ваш секретний ключ для підписання токенів
+      { expiresIn: "1h" } // Термін дії токену
+     
+    );
+
+    return res.json({ token });
+  });
+});
+
+
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  console.log("Authorization Header:", authHeader);
+  console.log("Extracted Token:", token);
+  
+  if (!token) {
+    console.log("Токен відсутній");
+    return res.sendStatus(401); // Якщо токен відсутній
+  }
+
+  jwt.verify(token, "secretkey", (err, user) => {
+    if (err) {
+      console.log("Недійсний токен:", err.message);
+      return res.sendStatus(403); // Якщо токен недійсний
+    }
+
+    req.user = user; // Зберігаємо інформацію про користувача в запиті
+    next(); // Переходимо до наступного middleware або обробника маршруту
+  });
+};
+
+
+app.get("/me", authenticateToken, (req, res) => {
+  console.log("Запит на маршрут /me");
+  console.log("Інформація про користувача з токену:", req.user);
+  
+  const userId = req.user.id;
+  console.log("ID користувача для SQL-запиту:", userId);
+  const q = `
+        SELECT 
+            users.*,  
+            roles.name AS role_name 
+        FROM 
+            users 
+        JOIN 
+            roles ON users.role_id = roles.id
+        WHERE users.id = ?
+    `;
+    db.query(q, [userId], (err, data) => {
+      if (err) {
+        console.log("Помилка SQL-запиту:", err);
+        return res.status(500).json({ message: "Помилка запиту до бази даних" });
+      }
+      console.log("Результат SQL-запиту:", data);
+      if (data.length === 0) {
+        console.log("Користувача не знайдено в базі даних для ID:", userId);
+        return res.status(404).json({ message: "User not found" });
+      }
+      return res.json(data[0]);
+    });
+});
+
 
 
 // Маршрут для перевірки унікальності  Register page 
