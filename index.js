@@ -193,9 +193,9 @@ app.put("/projects/:id", (req, res) => {
   });
 });
 
-//--------------- !!! upload images !!! ------------------//
+//--------------- !!! project upload images !!! ------------------//
 
-app.post("/upload", (req, res) => {
+app.post("/upload_project", (req, res) => {
   if (!req.files || !req.files.files) {
     return res.status(400).json({ msg: "No files uploaded" });
   }
@@ -245,13 +245,16 @@ app.get("/tasks", (req, res) => {
         SELECT 
             tasks.*,  
             task_statuses.status_name AS status_name, 
-            task_priorities.priority_name AS priority_name 
+            task_priorities.priority_name AS priority_name,
+            projects.title AS project_title  
         FROM 
             tasks 
         JOIN 
             task_statuses ON tasks.status_id = task_statuses.id
         JOIN 
             task_priorities ON tasks.priority_id = task_priorities.id
+        JOIN 
+            projects ON tasks.project_id = projects.id
     `;
   db.query(q, (err, data) => {
     if (err) return res.json(err);
@@ -265,13 +268,16 @@ app.get("/tasks/:id", (req, res) => {
         SELECT 
             tasks.*,  
             task_statuses.status_name AS status_name,
-            task_priorities.priority_name AS priority_name
+            task_priorities.priority_name AS priority_name,
+            projects.title AS project_title 
         FROM 
             tasks 
         JOIN 
             task_statuses ON tasks.status_id = task_statuses.id
         JOIN 
             task_priorities ON tasks.priority_id = task_priorities.id
+        JOIN 
+            projects ON tasks.project_id = projects.id
         WHERE tasks.id = ?
     `;
   db.query(q, [taskId], (err, data) => {
@@ -313,9 +319,11 @@ app.post("/tasks", (req, res) => {
   ];
   db.query(q, [values], (err, data) => {
     if (err) return res.json(err);
-    return res.json("Task has been created");
+    // Повертаємо ID нового завдання
+    return res.json({ insertId: data.insertId });
   });
 });
+
 
 app.delete("/tasks/:id", (req, res) => {
   const taskId = req.params.id;
@@ -348,17 +356,139 @@ app.put("/tasks/:id", (req, res) => {
   });
 });
 
-// ----------------------  USERS   --------------------------
+app.get("/task_images", (req, res) => {
+  const q = "SELECT * FROM task_images";
+  db.query(q, (err, data) => {
+    if (err) return res.json(err);
+    return res.json(data);
+  });
+});
+
+app.delete("/task_images/:id", (req, res) => {
+  const imagesId = req.params.id;
+  const q = "DELETE FROM task_images WHERE id = ?";
+
+  db.query(q, [imagesId], (err, data) => {
+    if (err) return res.json(err);
+    return res.json("images has been deleted");
+  });
+});
+
+//--------------- !!! task upload images !!! ------------------//
+
+app.post("/upload_task", (req, res) => {
+  if (!req.files || !req.files.files) {
+    return res.status(400).json({ msg: "No files uploaded" });
+  }
+
+  const files = Array.isArray(req.files.files)
+    ? req.files.files
+    : [req.files.files];
+  const { task_id } = req.body;
+
+  let uploadedFiles = [];
+
+  files.forEach((file, index) => {
+    const newFileName = encodeURI(Date.now() + `-${index}-` + file.name);
+    const filePath = `/images/${newFileName}`;
+
+    file.mv(`${__dirname}/../client/public/images/${newFileName}`, (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).send(err);
+      }
+
+      // SQL-запит для додавання URL зображення в таблицю project_images
+      const q = "INSERT INTO task_images (task_id, url) VALUES (?, ?)";
+      db.query(q, [task_id, filePath], (err, data) => {
+        if (err) {
+          console.error("DB Error: ", err);
+          return res
+            .status(500)
+            .json({ msg: "Failed to insert image into database" });
+        }
+
+        uploadedFiles.push({ fileName: file.name, filePath });
+
+        if (uploadedFiles.length === files.length) {
+          // Повертаємо відповідь після завантаження всіх файлів
+          res.json({ uploadedFiles });
+        }
+      });
+    });
+  });
+});
+
+
+// ----------------------  USERS    --------------------------
+
+app.post("/upload_user", (req, res) => {
+  if (!req.files || !req.files.files) {
+    return res.status(400).json({ msg: "No files uploaded" });
+  }
+
+  const files = Array.isArray(req.files.files)
+    ? req.files.files
+    : [req.files.files];
+  const { userId } = req.body;
+
+  if (!userId) {
+    console.error("userId is undefined");
+    return res.status(400).json({ msg: "userId is undefined" });
+  }
+
+  let uploadedFiles = [];
+
+  files.forEach((file, index) => {
+    const newFileName = encodeURI(Date.now() + `-${index}-` + file.name);
+    const filePath = `/images/${newFileName}`;
+
+    file.mv(`${__dirname}/../client/public/images/${newFileName}`, (err) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).send(err);
+      }
+
+      console.log(
+        "Updating user with file path:",
+        filePath,
+        "and userId:",
+        userId
+      );
+
+      // SQL-запит для додавання URL зображення в таблицю users
+      const q = "UPDATE users SET img = ? WHERE id = ?";
+      db.query(q, [filePath, userId], (err, data) => {
+        if (err) {
+          console.error("DB Error: ", err);
+          return res
+            .status(500)
+            .json({ msg: "Failed to update image in the database" });
+        }
+
+        uploadedFiles.push({ fileName: file.name, filePath });
+
+        if (uploadedFiles.length === files.length) {
+          // Повертаємо відповідь після завантаження всіх файлів
+          res.json({ uploadedFiles });
+        }
+      });
+    });
+  });
+});
 
 app.get("/users", (req, res) => {
   const q = `
         SELECT 
             users.*,
-            roles.name AS role_name 
+            roles.name AS role_name,
+            jobs.name AS job_name
         FROM 
             users 
         JOIN 
             roles ON users.role_id = roles.id
+        JOIN 
+            jobs ON users.job_id = jobs.id
     `;
   db.query(q, (err, data) => {
     if (err) return res.json(err);
@@ -371,11 +501,14 @@ app.get("/users/:id", (req, res) => {
   const q = `
         SELECT 
             users.*,  
-            roles.name AS role_name 
+            roles.name AS role_name,
+            jobs.name AS job_name 
         FROM 
             users 
         JOIN 
             roles ON users.role_id = roles.id
+        JOIN 
+            jobs ON users.job_id = jobs.id
         WHERE users.id = ?
     `;
   db.query(q, [userId], (err, data) => {
@@ -394,9 +527,17 @@ app.get("/roles", (req, res) => {
   });
 });
 
+app.get("/jobs", (req, res) => {
+  const q = "SELECT * FROM jobs";
+  db.query(q, (err, data) => {
+    if (err) return res.json(err);
+    return res.json(data);
+  });
+});
+
 app.post("/users", (req, res) => {
   const q =
-    "INSERT INTO users (`email`,`password`, `name`, `phone`, `img`, `descr`, `role_id`) VALUES (?)";
+    "INSERT INTO users (`email`,`password`, `name`, `phone`, `img`, `descr`, `role_id`, `job_id`) VALUES (?)";
   const salt = bcrypt.genSaltSync(10);
   const hashedPassword = bcrypt.hashSync(req.body.password, salt);
   const values = [
@@ -407,10 +548,11 @@ app.post("/users", (req, res) => {
     req.body.img,
     req.body.descr,
     req.body.role_id,
+    req.body.job_id,
   ];
   db.query(q, [values], (err, data) => {
     if (err) return res.json(err);
-    return res.json("User has been created");
+    return res.json({ insertId: data.insertId });
   });
 });
 
@@ -427,7 +569,7 @@ app.delete("/users/:id", (req, res) => {
 app.put("/users/:id", (req, res) => {
   const userId = req.params.id;
   const q =
-    "UPDATE users SET `email` = ?, `password` = ?, `name` = ?,  `phone`=?,`img`=?,`descr`=?, `role_id`=? WHERE id =?";
+    "UPDATE users SET `email` = ?, `password` = ?, `name` = ?,  `phone`=?,`img`=?,`descr`=?, `role_id`=?, `job_id`=? WHERE id =?";
 
   const values = [
     req.body.email,
@@ -437,6 +579,7 @@ app.put("/users/:id", (req, res) => {
     req.body.img,
     req.body.descr,
     req.body.role_id,
+    req.body.job_id,
   ];
 
   db.query(q, [...values, userId], (err, data) => {
@@ -476,31 +619,34 @@ app.post("/login", (req, res) => {
   const q = "SELECT * FROM users WHERE email = ?";
   db.query(q, [req.body.email], (err, data) => {
     if (err) return res.json(err);
-    if (data.length === 0) return res.status(404).json({ message: "Користувача не знайдено!" });
+    if (data.length === 0)
+      return res.status(404).json({ message: "Користувача не знайдено!" });
 
-    const isPasswordCorrect = bcrypt.compareSync(req.body.password, data[0].password);
-    
-    if (!isPasswordCorrect) return res.status(400).json({ message: "Неправильний пароль!" });
+    const isPasswordCorrect = bcrypt.compareSync(
+      req.body.password,
+      data[0].password
+    );
+
+    if (!isPasswordCorrect)
+      return res.status(400).json({ message: "Неправильний пароль!" });
 
     // Створення JWT токену
     const token = jwt.sign(
       { id: data[0].id, email: data[0].email },
       "secretkey", // Ваш секретний ключ для підписання токенів
       { expiresIn: "1h" } // Термін дії токену
-     
     );
 
     return res.json({ token });
   });
 });
 
-
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
   console.log("Authorization Header:", authHeader);
   console.log("Extracted Token:", token);
-  
+
   if (!token) {
     console.log("Токен відсутній");
     return res.sendStatus(401); // Якщо токен відсутній
@@ -517,11 +663,10 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-
 app.get("/me", authenticateToken, (req, res) => {
   console.log("Запит на маршрут /me");
   console.log("Інформація про користувача з токену:", req.user);
-  
+
   const userId = req.user.id;
   console.log("ID користувача для SQL-запиту:", userId);
   const q = `
@@ -534,26 +679,22 @@ app.get("/me", authenticateToken, (req, res) => {
             roles ON users.role_id = roles.id
         WHERE users.id = ?
     `;
-    db.query(q, [userId], (err, data) => {
-      if (err) {
-        console.log("Помилка SQL-запиту:", err);
-        return res.status(500).json({ message: "Помилка запиту до бази даних" });
-      }
-      console.log("Результат SQL-запиту:", data);
-      if (data.length === 0) {
-        console.log("Користувача не знайдено в базі даних для ID:", userId);
-        return res.status(404).json({ message: "User not found" });
-      }
-      return res.json(data[0]);
-    });
+  db.query(q, [userId], (err, data) => {
+    if (err) {
+      console.log("Помилка SQL-запиту:", err);
+      return res.status(500).json({ message: "Помилка запиту до бази даних" });
+    }
+    console.log("Результат SQL-запиту:", data);
+    if (data.length === 0) {
+      console.log("Користувача не знайдено в базі даних для ID:", userId);
+      return res.status(404).json({ message: "User not found" });
+    }
+    return res.json(data[0]);
+  });
 });
 
-
-
-// Маршрут для перевірки унікальності  Register page 
+// Маршрут для перевірки унікальності  Register page
 app.post("/check-unique", register);
-
-
 
 //------------------------   ASSIGNMENTS  ---------------------------
 
@@ -561,11 +702,14 @@ app.get("/assignments", (req, res) => {
   const q = `
         SELECT 
             assignments.*,
-            users.name AS user_name 
+            users.name AS user_name,
+            tasks.title AS task_title 
         FROM 
             assignments 
         JOIN 
             users ON assignments.user_id = users.id
+        JOIN 
+            tasks ON assignments.task_id = tasks.id
     `;
   db.query(q, (err, data) => {
     if (err) return res.json(err);
@@ -578,11 +722,14 @@ app.get("/assignments/:id", (req, res) => {
   const q = `
         SELECT 
             assignments.*,  
-            users.name AS user_name 
+            users.name AS user_name,
+             tasks.title AS task_title 
         FROM 
             assignments 
         JOIN 
             users ON assignments.user_id = users.id
+        JOIN 
+            tasks ON assignments.task_id = tasks.id
         WHERE assignments.id = ?
     `;
   db.query(q, [assignmentId], (err, data) => {
@@ -646,7 +793,10 @@ app.put("/assignments/:id", (req, res) => {
   const q =
     "UPDATE assignments SET `task_id` = ?, `user_id` = ?, `assigned_date`=? WHERE id =?";
 
-  const values = [req.body.task_id, req.body.user_id, req.body.assigned_date];
+  const values = [
+    req.body.task_id, 
+    req.body.user_id, 
+    req.body.assigned_date];
 
   db.query(q, [...values, assignmentId], (err, data) => {
     if (err) return res.json(err);
