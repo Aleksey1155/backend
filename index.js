@@ -11,9 +11,34 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import cookieParser from "cookie-parser";
 import { register } from "./register/checkAuth.js";
+// import cloudinary from "cloudinary";
+// import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+  console.log("Authorization Header:", authHeader);
+  console.log("Extracted Token:", token);
+
+  if (!token) {
+    console.log("Токен відсутній");
+    return res.sendStatus(401); // Якщо токен відсутній
+  }
+
+  jwt.verify(token, "secretkey", (err, user) => {
+    if (err) {
+      console.log("Недійсний токен:", err.message);
+      return res.sendStatus(403); // Якщо токен недійсний
+    }
+
+    req.user = user; // Зберігаємо інформацію про користувача в запиті
+    next(); // Переходимо до наступного middleware або обробника маршруту
+  });
+};
+
 
 // ----------    Завантаження змінних середовища  ----------
 dotenv.config();
@@ -37,11 +62,12 @@ const db = mysql.createConnection({
   database: "project_management",
 });
 
-// app.use(
-//   fileUpload({
-//     createParentPath: true,
-//   })
-// );
+
+// cloudinary.v2.config({
+//   cloud_name: "dj2gnypib",
+//   api_key: "732897359219285",
+//   api_secret: "WU8cy0aG-Vf6Kbt-4epVK-1NYEc",
+// });
 
 app.get("/", (req, res) => {
   res.json("hello");
@@ -58,13 +84,51 @@ const transporter = nodemailer.createTransport({
 
 // --------------------       PROJECTS    -------------------------------------
 
-app.get("/proj", (req, res) => {
-  const q = "SELECT * FROM projects";
+app.get("/home", (req, res) => {
+  const q = `SELECT 
+    p.id AS project_id, 
+    p.title AS project_title, 
+    p.description AS project_description, 
+    p.start_date AS project_start_date, 
+    p.end_date AS project_end_date,
+    
+    t.id AS task_id, 
+    t.title AS task_title, 
+    t.description AS task_description, 
+    t.start_date AS task_start_date, 
+    t.end_date AS task_end_date, 
+
+    u.id AS user_id,
+    u.name AS user_name,
+    u.email AS user_email,
+    u.img AS user_image,
+
+    ts.status_name AS task_status, 
+    ps.status_name AS project_status 
+
+FROM 
+    projects p
+JOIN 
+    tasks t ON p.id = t.project_id
+JOIN 
+    assignments a ON t.id = a.task_id
+JOIN 
+    users u ON a.user_id = u.id
+JOIN 
+    task_statuses ts ON t.status_id = ts.id -- З'єднуємо таблицю task_statuses за статусом завдання
+JOIN 
+    project_statuses ps ON p.status_id = ps.id 
+ORDER BY 
+    p.id, t.id, u.id;
+
+  `;
+
   db.query(q, (err, data) => {
     if (err) return res.json(err);
     return res.json(data);
   });
 });
+
 
 app.get("/projects", (req, res) => {
   const q = `
@@ -246,7 +310,8 @@ app.get("/tasks", (req, res) => {
             tasks.*,  
             task_statuses.status_name AS status_name, 
             task_priorities.priority_name AS priority_name,
-            projects.title AS project_title  
+            projects.title AS project_title,
+            ti.url AS image_url -- Вибираємо URL зображення ТА даємо їй псевдонім image_url  
         FROM 
             tasks 
         JOIN 
@@ -255,6 +320,20 @@ app.get("/tasks", (req, res) => {
             task_priorities ON tasks.priority_id = task_priorities.id
         JOIN 
             projects ON tasks.project_id = projects.id
+        LEFT JOIN 
+        ( -- Підзапит для вибору головного зображення
+            SELECT 
+                task_id, 
+                url 
+            FROM 
+                task_images 
+            WHERE 
+                id IN ( -- Вибираємо зображення з мінімальним ID для кожного завдання
+                SELECT MIN(id) 
+                FROM task_images 
+                GROUP BY task_id
+            )
+        ) ti ON ti.task_id = tasks.id -- Приєднуємо таблицю зображень до таблиці завдань    
     `;
   db.query(q, (err, data) => {
     if (err) return res.json(err);
@@ -323,7 +402,6 @@ app.post("/tasks", (req, res) => {
     return res.json({ insertId: data.insertId });
   });
 });
-
 
 app.delete("/tasks/:id", (req, res) => {
   const taskId = req.params.id;
@@ -419,61 +497,47 @@ app.post("/upload_task", (req, res) => {
   });
 });
 
-
 // ----------------------  USERS    --------------------------
 
 app.post("/upload_user", (req, res) => {
+  console.log('Request files:', req.files);
   if (!req.files || !req.files.files) {
     return res.status(400).json({ msg: "No files uploaded" });
   }
 
-  const files = Array.isArray(req.files.files)
-    ? req.files.files
-    : [req.files.files];
-  const { userId } = req.body;
+  const file = req.files.files; // Припустимо, що завантажується один файл
+  console.log('Uploaded file:', file);
 
-  if (!userId) {
-    console.error("userId is undefined");
-    return res.status(400).json({ msg: "userId is undefined" });
+  if (!file) {
+    return res.status(400).json({ msg: "No file uploaded" });
   }
 
-  let uploadedFiles = [];
+  const tempPath = `${__dirname}/../client/public/images/${Date.now()}-${file.name}`;
+  
+  file.mv(tempPath, async (err) => {
+    if (err) {
+      console.error("File move error:", err);
+      return res.status(500).json({ msg: "Failed to move file" });
+    }
 
-  files.forEach((file, index) => {
-    const newFileName = encodeURI(Date.now() + `-${index}-` + file.name);
-    const filePath = `/images/${newFileName}`;
+    try {
+      // Завантаження файлу в Cloudinary
+      const result = await cloudinary.v2.uploader.upload(tempPath);
 
-    file.mv(`${__dirname}/../client/public/images/${newFileName}`, (err) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).send(err);
-      }
-
-      console.log(
-        "Updating user with file path:",
-        filePath,
-        "and userId:",
-        userId
-      );
-
-      // SQL-запит для додавання URL зображення в таблицю users
+      // Оновлення бази даних з URL зображення з Cloudinary
       const q = "UPDATE users SET img = ? WHERE id = ?";
-      db.query(q, [filePath, userId], (err, data) => {
+      db.query(q, [result.secure_url, req.body.userId], (err, data) => {
         if (err) {
           console.error("DB Error: ", err);
-          return res
-            .status(500)
-            .json({ msg: "Failed to update image in the database" });
+          return res.status(500).json({ msg: "Failed to update image in the database" });
         }
 
-        uploadedFiles.push({ fileName: file.name, filePath });
-
-        if (uploadedFiles.length === files.length) {
-          // Повертаємо відповідь після завантаження всіх файлів
-          res.json({ uploadedFiles });
-        }
+        res.json({ msg: "Image uploaded successfully", url: result.secure_url });
       });
-    });
+    } catch (error) {
+      console.error("Cloudinary Error: ", error);
+      res.status(500).json({ msg: "Failed to upload image to Cloudinary" });
+    }
   });
 });
 
@@ -641,27 +705,6 @@ app.post("/login", (req, res) => {
   });
 });
 
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
-  console.log("Authorization Header:", authHeader);
-  console.log("Extracted Token:", token);
-
-  if (!token) {
-    console.log("Токен відсутній");
-    return res.sendStatus(401); // Якщо токен відсутній
-  }
-
-  jwt.verify(token, "secretkey", (err, user) => {
-    if (err) {
-      console.log("Недійсний токен:", err.message);
-      return res.sendStatus(403); // Якщо токен недійсний
-    }
-
-    req.user = user; // Зберігаємо інформацію про користувача в запиті
-    next(); // Переходимо до наступного middleware або обробника маршруту
-  });
-};
 
 app.get("/me", authenticateToken, (req, res) => {
   console.log("Запит на маршрут /me");
@@ -793,10 +836,7 @@ app.put("/assignments/:id", (req, res) => {
   const q =
     "UPDATE assignments SET `task_id` = ?, `user_id` = ?, `assigned_date`=? WHERE id =?";
 
-  const values = [
-    req.body.task_id, 
-    req.body.user_id, 
-    req.body.assigned_date];
+  const values = [req.body.task_id, req.body.user_id, req.body.assigned_date];
 
   db.query(q, [...values, assignmentId], (err, data) => {
     if (err) return res.json(err);
