@@ -541,6 +541,66 @@ app.post("/upload_user", (req, res) => {
   });
 });
 
+        // ----------- kanban for users -------------
+app.get("/kanban/:userId", (req, res) => {
+  const userId = req.params.userId;
+  const q = "SELECT * FROM user_kanbans WHERE user_id = ?";
+  db.query(q, [userId], (err, data) => {
+    if (err) return res.json(err);
+    return res.json(data);
+  });
+});
+
+app.delete("/kanban/:id", (req, res) => {
+  const taskId = req.params.id;
+  const q = "DELETE FROM user_kanbans  WHERE id = ?";
+
+  db.query(q, [taskId], (err, data) => {
+    if (err) return res.json(err);
+    return res.json("task has been deleted");
+  });
+});
+
+app.post("/kanban", (req, res) => {
+  try {
+    const q =
+      "INSERT INTO user_kanbans (`user_id`, `task_description`) VALUES(?)";
+    const values = [
+      req.body.user_id,
+      req.body.task_description,
+    ];
+    db.query(q, [values], (err, data) => {
+      res.json("Task created");
+    });
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
+app.put("/kanban/:id", (req, res) => {
+  const taskId = req.params.id;
+  const newStatus = req.body.status;
+  const q = "UPDATE user_kanbans SET status = ? WHERE id = ?";
+  
+  db.query(q, [newStatus, taskId], (err, data) => {
+    if (err) return res.status(500).json(err);
+    return res.json("Task status updated successfully");
+  });
+});
+
+app.delete("/delkanban/:userId", (req, res) => {
+  const userId = req.params.userId;  // Виправлено на userId
+  const q = "DELETE FROM user_kanbans WHERE user_id = ?";
+
+  db.query(q, [userId], (err, data) => {
+    if (err) return res.json(err);
+    return res.json("User kanban has been deleted");
+  });
+});
+
+
+ // ----------- END kanban for users -------------
+
 app.get("/users", (req, res) => {
   const q = `
         SELECT 
