@@ -39,7 +39,6 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-
 // ----------    Завантаження змінних середовища  ----------
 dotenv.config();
 
@@ -61,7 +60,6 @@ const db = mysql.createConnection({
   password: "",
   database: "project_management",
 });
-
 
 // cloudinary.v2.config({
 //   cloud_name: "dj2gnypib",
@@ -128,7 +126,6 @@ ORDER BY
     return res.json(data);
   });
 });
-
 
 app.get("/projects", (req, res) => {
   const q = `
@@ -500,20 +497,22 @@ app.post("/upload_task", (req, res) => {
 // ----------------------  USERS    --------------------------
 
 app.post("/upload_user", (req, res) => {
-  console.log('Request files:', req.files);
+  console.log("Request files:", req.files);
   if (!req.files || !req.files.files) {
     return res.status(400).json({ msg: "No files uploaded" });
   }
 
   const file = req.files.files; // Припустимо, що завантажується один файл
-  console.log('Uploaded file:', file);
+  console.log("Uploaded file:", file);
 
   if (!file) {
     return res.status(400).json({ msg: "No file uploaded" });
   }
 
-  const tempPath = `${__dirname}/../client/public/images/${Date.now()}-${file.name}`;
-  
+  const tempPath = `${__dirname}/../client/public/images/${Date.now()}-${
+    file.name
+  }`;
+
   file.mv(tempPath, async (err) => {
     if (err) {
       console.error("File move error:", err);
@@ -529,10 +528,15 @@ app.post("/upload_user", (req, res) => {
       db.query(q, [result.secure_url, req.body.userId], (err, data) => {
         if (err) {
           console.error("DB Error: ", err);
-          return res.status(500).json({ msg: "Failed to update image in the database" });
+          return res
+            .status(500)
+            .json({ msg: "Failed to update image in the database" });
         }
 
-        res.json({ msg: "Image uploaded successfully", url: result.secure_url });
+        res.json({
+          msg: "Image uploaded successfully",
+          url: result.secure_url,
+        });
       });
     } catch (error) {
       console.error("Cloudinary Error: ", error);
@@ -541,7 +545,7 @@ app.post("/upload_user", (req, res) => {
   });
 });
 
-        // ----------- kanban for users -------------
+// ----------- kanban for users -------------
 app.get("/kanban/:userId", (req, res) => {
   const userId = req.params.userId;
   const q = "SELECT * FROM user_kanbans WHERE user_id = ?";
@@ -565,10 +569,7 @@ app.post("/kanban", (req, res) => {
   try {
     const q =
       "INSERT INTO user_kanbans (`user_id`, `task_description`) VALUES(?)";
-    const values = [
-      req.body.user_id,
-      req.body.task_description,
-    ];
+    const values = [req.body.user_id, req.body.task_description];
     db.query(q, [values], (err, data) => {
       res.json("Task created");
     });
@@ -581,7 +582,7 @@ app.put("/kanban/:id", (req, res) => {
   const taskId = req.params.id;
   const newStatus = req.body.status;
   const q = "UPDATE user_kanbans SET status = ? WHERE id = ?";
-  
+
   db.query(q, [newStatus, taskId], (err, data) => {
     if (err) return res.status(500).json(err);
     return res.json("Task status updated successfully");
@@ -589,7 +590,7 @@ app.put("/kanban/:id", (req, res) => {
 });
 
 app.delete("/delkanban/:userId", (req, res) => {
-  const userId = req.params.userId;  // Виправлено на userId
+  const userId = req.params.userId; // Виправлено на userId
   const q = "DELETE FROM user_kanbans WHERE user_id = ?";
 
   db.query(q, [userId], (err, data) => {
@@ -598,8 +599,7 @@ app.delete("/delkanban/:userId", (req, res) => {
   });
 });
 
-
- // ----------- END kanban for users -------------
+// ----------- END kanban for users -------------
 
 app.get("/users", (req, res) => {
   const q = `
@@ -764,7 +764,6 @@ app.post("/login", (req, res) => {
     return res.json({ token });
   });
 });
-
 
 app.get("/me", authenticateToken, (req, res) => {
   console.log("Запит на маршрут /me");
@@ -937,7 +936,52 @@ app.get("/dashboard", (req, res) => {
   });
 });
 
-//-------------------------------    userdetails     ------------------------
+//-------------------------------    news    ------------------------
+
+app.get("/news", (req, res) => {
+  const q = `
+    SELECT 
+      news.*,
+      users.id AS user_id,
+      roles.name AS role_name
+
+    FROM
+      news
+    JOIN
+      users ON news.user_id = users.id
+    JOIN
+      roles ON users.role_id = roles.id
+
+    `;
+  db.query(q, (err, data) => {
+    if (err) return res.json(err);
+    return res.json(data);
+  });
+});
+
+app.post("/news", (req, res) => {
+  try {
+    const q =
+      "INSERT INTO news (`user_id`, `news_text`) VALUES(?)";
+    const values = [req.body.user_id, req.body.news_text];
+    db.query(q, [values], (err, data) => {
+      res.json("news text created");
+    });
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
+app.delete("/news/:id", (req, res) => {
+  const newsId = req.params.id;
+  const q = "DELETE FROM news  WHERE id = ?";
+
+  db.query(q, [newsId], (err, data) => {
+    if (err) return res.json(err);
+    return res.json("news has been deleted");
+  });
+});
+    
 
 app.listen(3001, () => {
   console.log("Connected to backend!");
