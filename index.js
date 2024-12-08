@@ -17,27 +17,7 @@ import { register } from "./register/checkAuth.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
-  console.log("Authorization Header:", authHeader);
-  console.log("Extracted Token:", token);
 
-  if (!token) {
-    console.log("Токен відсутній");
-    return res.sendStatus(401); // Якщо токен відсутній
-  }
-
-  jwt.verify(token, "secretkey", (err, user) => {
-    if (err) {
-      console.log("Недійсний токен:", err.message);
-      return res.sendStatus(403); // Якщо токен недійсний
-    }
-
-    req.user = user; // Зберігаємо інформацію про користувача в запиті
-    next(); // Переходимо до наступного middleware або обробника маршруту
-  });
-};
 
 // ----------    Завантаження змінних середовища  ----------
 dotenv.config();
@@ -658,46 +638,25 @@ app.get("/jobs", (req, res) => {
     return res.json(data);
   });
 });
+ 
 
-app.post("/users", (req, res) => {
-  const q =
-    "INSERT INTO users (`email`,`password`, `name`, `phone`, `img`, `descr`, `role_id`, `job_id`) VALUES (?)";
-  const salt = bcrypt.genSaltSync(10);
-  const hashedPassword = bcrypt.hashSync(req.body.password, salt);
-  const values = [
-    req.body.email,
-    hashedPassword,
-    req.body.name,
-    req.body.phone,
-    req.body.img,
-    req.body.descr,
-    req.body.role_id,
-    req.body.job_id,
-  ];
-  db.query(q, [values], (err, data) => {
-    if (err) return res.json(err);
-    return res.json({ insertId: data.insertId });
-  });
-});
-
-app.delete("/users/:id", (req, res) => {
-  const userId = req.params.id;
-  const q = "DELETE FROM users WHERE id = ?";
-
-  db.query(q, [userId], (err, data) => {
-    if (err) return res.json(err);
-    return res.json("User has been deleted");
-  });
-});
 
 app.put("/users/:id", (req, res) => {
   const userId = req.params.id;
+
+  // Якщо в запиті пароль, то хешуємо його
+  let hashedPassword = req.body.password;
+  if (req.body.password) {
+    const salt = bcrypt.genSaltSync(10);
+    hashedPassword = bcrypt.hashSync(req.body.password, salt);
+  }
+
   const q =
     "UPDATE users SET `email` = ?, `password` = ?, `name` = ?,  `phone`=?,`img`=?,`descr`=?, `role_id`=?, `job_id`=? WHERE id =?";
 
   const values = [
     req.body.email,
-    req.body.password,
+    hashedPassword,  // Використовуємо хешований пароль
     req.body.name,
     req.body.phone,
     req.body.img,
@@ -708,9 +667,10 @@ app.put("/users/:id", (req, res) => {
 
   db.query(q, [...values, userId], (err, data) => {
     if (err) return res.json(err);
-    return res.json("User has been update");
+    return res.json("User has been updated");
   });
 });
+
 
 app.get("/userdetails/:id", (req, res) => {
   const userId = req.params.id;
@@ -737,10 +697,85 @@ app.get("/userdetails/:id", (req, res) => {
     return res.json(data);
   });
 });
+
+app.delete("/users/:id", (req, res) => {
+  const userId = req.params.id;
+  const q = "DELETE FROM users WHERE id = ?";
+
+  db.query(q, [userId], (err, data) => {
+    if (err) return res.json(err);
+    return res.json("User has been deleted");
+  });
+});
+
+
+
+
+
+
+//+++++++++++++++++++++ authenticateToken ++++++++++++++++++++++++++
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+  console.log("Authorization Header:", authHeader);
+  console.log("Extracted Token:", token);
+
+  if (!token) {
+    console.log("Токен відсутній");
+    return res.sendStatus(401); // Якщо токен відсутній
+  }
+
+  jwt.verify(token, "secretkey", (err, user) => {
+    if (err) {
+      console.log("Недійсний токен:", err.message);
+      return res.sendStatus(403); // Якщо токен недійсний
+    }
+
+    req.user = user; // Зберігаємо інформацію про користувача в запиті
+    next(); // Переходимо до наступного middleware або обробника маршруту
+  });
+};
+
+
+// ++++++++++++++++++ app.post Додавання юзера , Регістрація ++++++++++++++++++
+
+app.post("/users", (req, res) => {
+  const q =
+    "INSERT INTO users (`email`,`password`, `name`, `phone`, `img`, `descr`, `role_id`, `job_id`) VALUES (?)";
+  const salt = bcrypt.genSaltSync(10);
+  const hashedPassword = bcrypt.hashSync(req.body.password, salt);
+  const values = [
+    req.body.email,
+    hashedPassword,
+    req.body.name,
+    req.body.phone,
+    req.body.img,
+    req.body.descr,
+    req.body.role_id,
+    req.body.job_id,
+  ];
+  db.query(q, [values], (err, data) => {
+    if (err) return res.json(err);
+    return res.json({ insertId: data.insertId });
+  });
+});
+
+
 //+++++++++  login  ++++++
 
 app.post("/login", (req, res) => {
-  const q = "SELECT * FROM users WHERE email = ?";
+  const q = `
+    SELECT 
+      users.*,  
+      roles.name AS role_name 
+    FROM 
+      users 
+    JOIN 
+      roles ON users.role_id = roles.id
+    WHERE 
+      email = ?
+  `;
+  
   db.query(q, [req.body.email], (err, data) => {
     if (err) return res.json(err);
     if (data.length === 0)
@@ -754,10 +789,10 @@ app.post("/login", (req, res) => {
     if (!isPasswordCorrect)
       return res.status(400).json({ message: "Неправильний пароль!" });
 
-    // Створення JWT токену
+    // Створення JWT токену з role_name
     const token = jwt.sign(
-      { id: data[0].id, email: data[0].email },
-      "secretkey", // Ваш секретний ключ для підписання токенів
+      { id: data[0].id, email: data[0].email, role_name: data[0].role_name }, // Додаємо role_name
+      "secretkey", // Секретний ключ для підписання токенів
       { expiresIn: "1h" } // Термін дії токену
     );
 
@@ -765,6 +800,8 @@ app.post("/login", (req, res) => {
   });
 });
 
+
+//+++++++++++    Маршрут для аутентифікації      ++++++++++++++++++++
 app.get("/me", authenticateToken, (req, res) => {
   console.log("Запит на маршрут /me");
   console.log("Інформація про користувача з токену:", req.user);
@@ -796,6 +833,7 @@ app.get("/me", authenticateToken, (req, res) => {
 });
 
 // Маршрут для перевірки унікальності  Register page
+
 app.post("/check-unique", register);
 
 //------------------------   ASSIGNMENTS  ---------------------------
