@@ -11,13 +11,13 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import cookieParser from "cookie-parser";
 import { register } from "./register/checkAuth.js";
+import path from "path";
+import mongoose from 'mongoose';
 // import cloudinary from "cloudinary";
 // import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-
 
 // ----------    Завантаження змінних середовища  ----------
 dotenv.config();
@@ -46,6 +46,11 @@ const db = mysql.createConnection({
 //   api_key: "732897359219285",
 //   api_secret: "WU8cy0aG-Vf6Kbt-4epVK-1NYEc",
 // });
+
+mongoose.connect('mongodb://localhost:27017/chat_database', {
+  // useNewUrlParser: true,
+  // useUnifiedTopology: true,
+});
 
 app.get("/", (req, res) => {
   res.json("hello");
@@ -478,50 +483,39 @@ app.post("/upload_task", (req, res) => {
 
 app.post("/upload_user", (req, res) => {
   console.log("Request files:", req.files);
+
   if (!req.files || !req.files.files) {
     return res.status(400).json({ msg: "No files uploaded" });
   }
 
-  const file = req.files.files; // Припустимо, що завантажується один файл
+  const file = req.files.files;
   console.log("Uploaded file:", file);
 
-  if (!file) {
-    return res.status(400).json({ msg: "No file uploaded" });
-  }
+  const uniqueFileName = `${Date.now()}-${file.name}`; // Унікальне ім'я
+  const uploadDir = path.join(__dirname, "../client/public/images/");
+  const filePath = path.join(uploadDir, uniqueFileName);
 
-  const tempPath = `${__dirname}/../client/public/images/${Date.now()}-${
-    file.name
-  }`;
-
-  file.mv(tempPath, async (err) => {
+  file.mv(filePath, (err) => {
     if (err) {
       console.error("File move error:", err);
       return res.status(500).json({ msg: "Failed to move file" });
     }
 
-    try {
-      // Завантаження файлу в Cloudinary
-      const result = await cloudinary.v2.uploader.upload(tempPath);
+    // Оновлення бази даних з правильним іменем
+    const q = "UPDATE users SET img = ? WHERE id = ?";
+    db.query(q, [`/images/${uniqueFileName}`, req.body.userId], (err, data) => {
+      if (err) {
+        console.error("DB Error: ", err);
+        return res
+          .status(500)
+          .json({ msg: "Failed to update image in the database" });
+      }
 
-      // Оновлення бази даних з URL зображення з Cloudinary
-      const q = "UPDATE users SET img = ? WHERE id = ?";
-      db.query(q, [result.secure_url, req.body.userId], (err, data) => {
-        if (err) {
-          console.error("DB Error: ", err);
-          return res
-            .status(500)
-            .json({ msg: "Failed to update image in the database" });
-        }
-
-        res.json({
-          msg: "Image uploaded successfully",
-          url: result.secure_url,
-        });
+      res.json({
+        msg: "Image uploaded successfully",
+        url: `/images/${uniqueFileName}`, // Правильний шлях
       });
-    } catch (error) {
-      console.error("Cloudinary Error: ", error);
-      res.status(500).json({ msg: "Failed to upload image to Cloudinary" });
-    }
+    });
   });
 });
 
@@ -638,8 +632,6 @@ app.get("/jobs", (req, res) => {
     return res.json(data);
   });
 });
- 
-
 
 app.put("/users/:id", (req, res) => {
   const userId = req.params.id;
@@ -652,12 +644,12 @@ app.put("/users/:id", (req, res) => {
   }
 
   const q =
-    "UPDATE users SET `email` = ?, `password` = ?, `name` = ?,  `phone`=?,`img`=?,`descr`=?, `role_id`=?, `job_id`=? WHERE id =?";
+    "UPDATE users SET `email` = ?,  `name` = ?,  `password`=?, `phone`=?,`img`=?,`descr`=?, `role_id`=?, `job_id`=? WHERE id =?";
 
   const values = [
     req.body.email,
-    hashedPassword,  // Використовуємо хешований пароль
     req.body.name,
+    hashedPassword,
     req.body.phone,
     req.body.img,
     req.body.descr,
@@ -670,7 +662,6 @@ app.put("/users/:id", (req, res) => {
     return res.json("User has been updated");
   });
 });
-
 
 app.get("/userdetails/:id", (req, res) => {
   const userId = req.params.id;
@@ -708,11 +699,6 @@ app.delete("/users/:id", (req, res) => {
   });
 });
 
-
-
-
-
-
 //+++++++++++++++++++++ authenticateToken ++++++++++++++++++++++++++
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
@@ -735,7 +721,6 @@ const authenticateToken = (req, res, next) => {
     next(); // Переходимо до наступного middleware або обробника маршруту
   });
 };
-
 
 // ++++++++++++++++++ app.post Додавання юзера , Регістрація ++++++++++++++++++
 
@@ -760,7 +745,6 @@ app.post("/users", (req, res) => {
   });
 });
 
-
 //+++++++++  login  ++++++
 
 app.post("/login", (req, res) => {
@@ -775,7 +759,7 @@ app.post("/login", (req, res) => {
     WHERE 
       email = ?
   `;
-  
+
   db.query(q, [req.body.email], (err, data) => {
     if (err) return res.json(err);
     if (data.length === 0)
@@ -799,7 +783,6 @@ app.post("/login", (req, res) => {
     return res.json({ token });
   });
 });
-
 
 //+++++++++++    Маршрут для аутентифікації      ++++++++++++++++++++
 app.get("/me", authenticateToken, (req, res) => {
@@ -999,8 +982,7 @@ app.get("/news", (req, res) => {
 
 app.post("/news", (req, res) => {
   try {
-    const q =
-      "INSERT INTO news (`user_id`, `news_text`) VALUES(?)";
+    const q = "INSERT INTO news (`user_id`, `news_text`) VALUES(?)";
     const values = [req.body.user_id, req.body.news_text];
     db.query(q, [values], (err, data) => {
       res.json("news text created");
@@ -1019,7 +1001,233 @@ app.delete("/news/:id", (req, res) => {
     return res.json("news has been deleted");
   });
 });
-    
+
+//-------------------------------    social    ------------------------
+
+//-------------------------------    posts    ------------------------
+
+app.get("/posts", (req, res) => {
+  const q = `
+    SELECT posts.*, users.name, users.email, users.img AS user_img
+    FROM posts
+    INNER JOIN users ON posts.user_id = users.id
+  `;
+
+  db.query(q, (err, data) => {
+    if (err) return res.json(err);
+    return res.json(data);
+  });
+});
+
+app.post("/posts", (req, res) => {
+  const q =
+    "INSERT INTO posts (`description`, `img`, `user_id`, `created_time`) VALUES (?, ?, ?, NOW())";
+
+  const values = [
+    req.body.description || "",
+    req.body.img || "",
+    req.body.user_id,
+  ];
+
+  db.query(q, values, (err, data) => {
+    if (err) {
+      console.error("Error inserting post:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    return res.status(201).json({ insertId: data.insertId });
+  });
+});
+
+app.post("/upload_post", (req, res) => {
+  console.log("Request files:", req.files);
+
+  if (!req.files || !req.files.files) {
+    return res.status(400).json({ msg: "No files uploaded" });
+  }
+
+  const file = req.files.files;
+  console.log("Uploaded file:", file);
+
+  const uniqueFileName = `${Date.now()}-${file.name}`; // Унікальне ім'я
+  const uploadDir = path.join(__dirname, "../client/public/images/");
+  const filePath = path.join(uploadDir, uniqueFileName);
+
+  file.mv(filePath, (err) => {
+    if (err) {
+      console.error("File move error:", err);
+      return res.status(500).json({ msg: "Failed to move file" });
+    }
+
+    // Оновлення бази даних з правильним іменем
+    const q = "UPDATE posts SET img = ? WHERE id = ?";
+    db.query(q, [`/images/${uniqueFileName}`, req.body.postId], (err, data) => {
+      if (err) {
+        console.error("DB Error: ", err);
+        return res
+          .status(500)
+          .json({ msg: "Failed to update image in the database" });
+      }
+
+      res.json({
+        msg: "Image uploaded successfully",
+        url: `/images/${uniqueFileName}`, // Правильний шлях
+      });
+    });
+  });
+});
+
+app.put("/posts/:id", (req, res) => {
+  const postId = req.params.id;
+  const q = "UPDATE posts SET `description` = ?, `img`=? WHERE id =?";
+
+  const values = [req.body.description, req.body.img];
+
+  db.query(q, [...values, postId], (err, data) => {
+    if (err) return res.json(err);
+    return res.json("Post has been update");
+  });
+});
+
+app.delete("/posts/:id", (req, res) => {
+  const postId = req.params.id;
+  const q = "DELETE FROM posts WHERE id = ?";
+
+  db.query(q, [postId], (err, data) => {
+    if (err) return res.json(err);
+    return res.json("Post has been deleted");
+  });
+});
+
+// ---------------------------- Comments ---------------------------------
+
+app.get("/comments", (req, res) => {
+  const { postId } = req.query; 
+
+  if (!postId) {
+    return res.status(400).json({ error: "postId is required" });
+  }
+
+  const q = `
+    SELECT comments.*, users.name, users.email, users.img AS user_img
+    FROM comments
+    INNER JOIN users ON comments.user_id = users.id
+    WHERE comments.post_id = ?
+  `;
+
+  db.query(q, [postId], (err, data) => {
+    if (err) return res.status(500).json({ error: "Database error" });
+    return res.json(data);
+  });
+});
+
+
+app.post("/comments", (req, res) => {
+  const { description, post_id, user_id } = req.body;
+
+  if (!description || !post_id || !user_id) {
+    return res.status(400).json({ error: "All fields are required" });
+  }
+
+  const q = `
+    INSERT INTO comments (description, post_id, user_id, created_time) 
+    VALUES (?, ?, ?, NOW())
+  `;
+
+  const values = [description, post_id, user_id];
+
+  db.query(q, values, (err, data) => {
+    if (err) {
+      console.error("Database error:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    return res.status(201).json({ message: "Comment has been created" });
+  });
+});
+
+app.get("/comments/count", (req, res) => {
+  const { postId } = req.query;
+
+  if (!postId) {
+    return res.status(400).json({ error: "postId is required" });
+  }
+
+  const q = `SELECT COUNT(*) AS count FROM comments WHERE post_id = ?`;
+
+  db.query(q, [postId], (err, data) => {
+    if (err) {
+      console.error("Database error:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    return res.json({ count: data[0].count });
+  });
+});
+
+// -------------------------------  chat MongoBD  -----------------------------
+
+const messageSchema = new mongoose.Schema({
+  userId: Number,
+  chatId: String,
+  message: String,
+  timestamp: Date,
+  replyTo: mongoose.Schema.Types.ObjectId,
+  edited: Boolean,
+  attachments: [String],
+});
+
+const Message = mongoose.model('Message', messageSchema);
+
+
+
+app.get("/api/messages", async (req, res) => {
+  try {
+      const messages = await Message.find().sort({ timestamp: 1 });
+      const result = [];
+
+      for (const message of messages) {
+          const [rows] = await new Promise((resolve, reject) => {
+              db.query("SELECT name FROM users WHERE id = ?", [message.userId], (err, rows) => {
+                  if (err) {
+                      reject(err);
+                  } else {
+                      resolve(rows);
+                  }
+              });
+          });
+
+          const name = rows[0]?.name || "Unknown User";
+
+          result.push({
+              id: message._id,
+              name: name,
+              time: message.timestamp.toLocaleTimeString(),
+              message: message.message,
+          });
+      }
+
+      res.json(result);
+  } catch (err) {
+      console.error(err);
+      res.status(500).send("Server Error");
+  }
+});
+
+// Додавання повідомлення в MongoDB
+app.post("/api/messages", async (req, res) => {
+  try {
+      const newMessage = new Message({
+          userId: req.body.userId,
+          message: req.body.message,
+          timestamp: new Date(),
+      });
+      await newMessage.save();
+      res.status(201).json({ message: "Message added successfully" });
+  } catch (err) {
+      console.error(err);
+      res.status(500).send("Server Error");
+  }
+});
+
+
 
 app.listen(3001, () => {
   console.log("Connected to backend!");
