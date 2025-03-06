@@ -46,6 +46,7 @@ const db = mysql.createConnection({
 //   api_key: "732897359219285",
 //   api_secret: "WU8cy0aG-Vf6Kbt-4epVK-1NYEc",
 // });
+//---------------------- mongoose DB Connection   -----------------------------------
 
 mongoose.connect('mongodb://localhost:27017/chat_database', {
   // useNewUrlParser: true,
@@ -1169,7 +1170,7 @@ const messageSchema = new mongoose.Schema({
   chatId: String,
   message: String,
   timestamp: Date,
-  replyTo: mongoose.Schema.Types.ObjectId,
+  replyTo: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
   edited: Boolean,
   attachments: [String],
 });
@@ -1180,53 +1181,93 @@ const Message = mongoose.model('Message', messageSchema);
 
 app.get("/api/messages", async (req, res) => {
   try {
-      const messages = await Message.find().sort({ timestamp: 1 });
-      const result = [];
+      // Отримуємо всі повідомлення з MongoDB
+      const messages = await Message.find()
+        .populate("replyTo", "message") // Повністю завантажує тільки поле `message`
+        .sort({ timestamp: 1 });
 
-      for (const message of messages) {
-          const [rows] = await new Promise((resolve, reject) => {
-              db.query("SELECT name FROM users WHERE id = ?", [message.userId], (err, rows) => {
-                  if (err) {
-                      reject(err);
-                  } else {
-                      resolve(rows);
-                  }
-              });
-          });
+      //  Лог для перевірки `replyTo`
+      // console.log("Fetched Messages:", JSON.stringify(messages, null, 2));
+      // messages.forEach(msg => {
+      //     console.log("ReplyTo Object:", msg.replyTo);
+      // });
 
-          const name = rows[0]?.name || "Unknown User";
+      // Отримуємо імена користувачів з MySQL
+      const userIds = messages.map(msg => msg.userId);
+      db.query('SELECT id, name FROM users WHERE id IN (?)', [userIds], (err, users) => {
+          if (err) {
+              console.error("Error fetching users:", err);
+              return res.status(500).json({ error: "Error fetching users" });
+          }
 
-          result.push({
-              id: message._id,
-              name: name,
-              time: message.timestamp.toLocaleTimeString(),
-              message: message.message,
-          });
-      }
+          // Створюємо мапу користувачів за їхнім id
+          const userMap = users.reduce((acc, user) => {
+              acc[user.id] = user.name;
+              return acc;
+          }, {});
 
-      res.json(result);
+          // Формуємо відповідь з іменами користувачів
+          res.json(messages.map(msg => {
+              return {
+                  id: msg._id,
+                  userId: msg.userId,
+                  name: userMap[msg.userId] || "Unknown User",
+                  time: msg.timestamp ? msg.timestamp.toLocaleTimeString() : "No time",
+                  message: msg.message,
+                  replyTo: msg.replyTo ? { id: msg.replyTo._id, message: msg.replyTo.message } : null,
+              };
+          }));
+      });
+
   } catch (err) {
-      console.error(err);
-      res.status(500).send("Server Error");
+      console.error("Error fetching messages:", err);
+      res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-// Додавання повідомлення в MongoDB
+
+
+
+// Додавання нового повідомлення
 app.post("/api/messages", async (req, res) => {
   try {
+      const { userId, message, replyTo } = req.body;
       const newMessage = new Message({
-          userId: req.body.userId,
-          message: req.body.message,
-          timestamp: new Date(),
+          userId,
+          message,
+          replyTo: replyTo || null,
+          timestamp: new Date() // Додаємо дату та час
       });
+
       await newMessage.save();
-      res.status(201).json({ message: "Message added successfully" });
+      res.status(201).json(newMessage);
   } catch (err) {
-      console.error(err);
+      console.error("Error saving message:", err);
+      res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+// Редагування повідомлення
+app.put("/api/messages/:id", async (req, res) => {
+  try {
+      const { message } = req.body;
+      await Message.findByIdAndUpdate(req.params.id, { message });
+      res.json({ message: "Message updated successfully" });
+  } catch (err) {
       res.status(500).send("Server Error");
   }
 });
 
+// Видалення повідомлення
+app.delete("/api/messages/:id", async (req, res) => {
+  try {
+      await Message.findByIdAndDelete(req.params.id);
+      res.json({ message: "Message deleted successfully" });
+  } catch (err) {
+      res.status(500).send("Server Error");
+  }
+});
 
 
 app.listen(3001, () => {
