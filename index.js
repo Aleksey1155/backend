@@ -1181,49 +1181,50 @@ const Message = mongoose.model('Message', messageSchema);
 
 app.get("/api/messages", async (req, res) => {
   try {
-      // Отримуємо всі повідомлення з MongoDB
-      const messages = await Message.find()
-        .populate("replyTo", "message") // Повністю завантажує тільки поле `message`
-        .sort({ timestamp: 1 });
+      const messages = await Message.find().sort({ timestamp: 1 });
 
-      //  Лог для перевірки `replyTo`
-      // console.log("Fetched Messages:", JSON.stringify(messages, null, 2));
+      // Отримуємо унікальні ObjectId з поля replyTo
+      const replyToIds = messages
+          .filter(msg => msg.replyTo !== null) // Беремо тільки ті, які не null
+          .map(msg => msg.replyTo); // Витягуємо самі ID
+
+      // Шукаємо ці ID в БД
+      const existingReplies = await Message.find({ _id: { $in: replyToIds } }, "_id message");
+
+      // Створюємо мапу існуючих ID
+      const replyMap = existingReplies.reduce((acc, msg) => {
+          acc[msg._id] = msg.message;
+          return acc;
+      }, {});
+
+      // console.log("Fetched Messages:");
       // messages.forEach(msg => {
-      //     console.log("ReplyTo Object:", msg.replyTo);
+      //     if (msg.replyTo === null) {
+      //         console.log(`Message ID: ${msg._id} | replyTo: NULL (не було відповіді)`);
+      //     } else if (replyMap[msg.replyTo]) {
+      //         console.log(`Message ID: ${msg._id} | replyTo ID: ${msg.replyTo} (ІСНУЄ в БД)`);
+      //     } else {
+      //         console.log(`Message ID: ${msg._id} | replyTo ID: ${msg.replyTo} (ВИДАЛЕНО!)`);
+      //     }
       // });
 
-      // Отримуємо імена користувачів з MySQL
-      const userIds = messages.map(msg => msg.userId);
-      db.query('SELECT id, name FROM users WHERE id IN (?)', [userIds], (err, users) => {
-          if (err) {
-              console.error("Error fetching users:", err);
-              return res.status(500).json({ error: "Error fetching users" });
-          }
-
-          // Створюємо мапу користувачів за їхнім id
-          const userMap = users.reduce((acc, user) => {
-              acc[user.id] = user.name;
-              return acc;
-          }, {});
-
-          // Формуємо відповідь з іменами користувачів
-          res.json(messages.map(msg => {
-              return {
-                  id: msg._id,
-                  userId: msg.userId,
-                  name: userMap[msg.userId] || "Unknown User",
-                  time: msg.timestamp ? msg.timestamp.toLocaleTimeString() : "No time",
-                  message: msg.message,
-                  replyTo: msg.replyTo ? { id: msg.replyTo._id, message: msg.replyTo.message } : null,
-              };
-          }));
-      });
+      res.json(messages.map(msg => ({
+          id: msg._id,
+          userId: msg.userId,
+          message: msg.message,
+          replyTo: msg.replyTo
+              ? replyMap[msg.replyTo] 
+                  ? { id: msg.replyTo, message: replyMap[msg.replyTo] }
+                  : "Deleted"
+              : null,
+      })));
 
   } catch (err) {
       console.error("Error fetching messages:", err);
       res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
 
 
 
