@@ -13,6 +13,9 @@ import cookieParser from "cookie-parser";
 import { register } from "./register/checkAuth.js";
 import path from "path";
 import mongoose from 'mongoose';
+import { Server } from "socket.io";
+import http from "http";
+import { time } from "console";
 // import cloudinary from "cloudinary";
 // import fs from 'fs';
 
@@ -778,7 +781,7 @@ app.post("/login", (req, res) => {
     const token = jwt.sign(
       { id: data[0].id, email: data[0].email, role_name: data[0].role_name }, // Додаємо role_name
       "secretkey", // Секретний ключ для підписання токенів
-      { expiresIn: "1h" } // Термін дії токену
+      { expiresIn: "8h" } // Термін дії токену
     );
 
     return res.json({ token });
@@ -1212,6 +1215,7 @@ app.get("/api/messages", async (req, res) => {
           id: msg._id,
           userId: msg.userId,
           message: msg.message,
+          time: msg.timestamp ? msg.timestamp.toISOString() : "No time",
           replyTo: msg.replyTo
               ? replyMap[msg.replyTo] 
                   ? { id: msg.replyTo, message: replyMap[msg.replyTo] }
@@ -1237,7 +1241,8 @@ app.post("/api/messages", async (req, res) => {
           userId,
           message,
           replyTo: replyTo || null,
-          timestamp: new Date() // Додаємо дату та час
+          timestamp: new Date().toISOString()
+          // Додаємо дату та час
       });
 
       await newMessage.save();
@@ -1249,28 +1254,69 @@ app.post("/api/messages", async (req, res) => {
 });
 
 
+
 // Редагування повідомлення
 app.put("/api/messages/:id", async (req, res) => {
   try {
-      const { message } = req.body;
-      await Message.findByIdAndUpdate(req.params.id, { message });
+    const { message } = req.body;
+    const updatedMessage = await Message.findByIdAndUpdate(
+      req.params.id,
+      { message },
+      { new: true } // Отримати оновлене повідомлення
+    );
+    if (updatedMessage) {
+      io.emit("message_updated", updatedMessage); // Розсилка оновлення через Socket.io
       res.json({ message: "Message updated successfully" });
+    } else {
+      res.status(404).send("Message not found");
+    }
   } catch (err) {
-      res.status(500).send("Server Error");
+    res.status(500).send("Server Error");
   }
 });
 
 // Видалення повідомлення
 app.delete("/api/messages/:id", async (req, res) => {
   try {
-      await Message.findByIdAndDelete(req.params.id);
+    const deletedMessage = await Message.findByIdAndDelete(req.params.id);
+    if (deletedMessage) {
+      io.emit("message_deleted", req.params.id); // Розсилка оновлення через Socket.io
       res.json({ message: "Message deleted successfully" });
+    } else {
+      res.status(404).send("Message not found");
+    }
   } catch (err) {
-      res.status(500).send("Server Error");
+    res.status(500).send("Server Error");
   }
 });
 
+// ---------------------------  Socket io  -------------------------
 
-app.listen(3001, () => {
-  console.log("Connected to backend!");
+const server = http.createServer(app); // Створюємо сервер через http.createServer
+const io = new Server(server, {
+  cors: {
+    origin: "http://localhost:5173", // URL  фронтенду
+    methods: ["GET", "POST", "PUT", "DELETE"]
+  }
+}); // Ініціалізуємо socket.io через server
+
+// Налаштування обробки підключення клієнтів
+io.on("connection", (socket) => {
+  console.log("A user connected");
+
+  // Обробка події 'message'
+  socket.on("message", (msg) => {
+    console.log("Message received: ", msg);
+    io.emit("message", msg); // Надсилаємо повідомлення всім підключеним клієнтам
+  });
+
+  // Обробка відключення
+  socket.on("disconnect", () => {
+    console.log("A user disconnected");
+  });
+});
+
+// Порт для сервера
+server.listen(3001, () => {
+  console.log("Server running on http://localhost:3001");
 });
