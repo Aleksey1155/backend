@@ -168,6 +168,35 @@ app.get("/projects/:id", (req, res) => {
   });
 });
 
+app.get("/projectdetails/:id", (req, res) => {
+  const projectId = req.params.id; // Змінив на projectId
+  const q = `
+        SELECT 
+            projects.id AS project_id,
+            projects.title AS project_title,
+            projects.start_date AS project_start_date,
+            projects.actual_end_date AS project_actual_end_date,
+            tasks.title AS task_title,
+            tasks.start_date AS task_start_date,
+            tasks.end_date AS task_end_date,
+            tasks.actual_end_date AS task_actual_end_date
+        FROM 
+            projects
+        LEFT JOIN 
+            tasks ON tasks.project_id = projects.id
+        WHERE 
+            projects.id = ?
+    `;
+
+  db.query(q, [projectId], (err, data) => {
+    if (err) return res.json(err);
+    if (data.length === 0)
+      return res.status(404).json({ message: "No tasks found for this project" });
+    return res.json(data);
+  });
+});
+
+
 app.get("/project_statuses", (req, res) => {
   const q = "SELECT * FROM project_statuses";
   db.query(q, (err, data) => {
@@ -186,16 +215,17 @@ app.get("/project_images", (req, res) => {
 
 app.post("/projects", (req, res) => {
   const q =
-    "INSERT INTO projects (`title`, `description`, `start_date`, `end_date`, `status_id`) VALUES (?)";
+    "INSERT INTO projects (`title`, `description`, `start_date`, `end_date`, `actual_end_date`, `status_id`) VALUES (?)";
 
   const values = [
     req.body.title,
     req.body.description,
     req.body.start_date,
     req.body.end_date,
+    req.body.actual_end_date,
     req.body.status_id,
   ];
-
+  
   db.query(q, [values], (err, data) => {
     if (err) return res.json(err);
 
@@ -227,13 +257,16 @@ app.delete("/projects/:id", (req, res) => {
 app.put("/projects/:id", (req, res) => {
   const projectId = req.params.id;
   const q =
-    "UPDATE projects SET `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `status_id`=? WHERE id =?";
+    "UPDATE projects SET `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `actual_end_date`=?, `status_id`=? WHERE id =?";
+
+    
 
   const values = [
     req.body.title,
     req.body.description,
     req.body.start_date,
     req.body.end_date,
+    req.body.actual_end_date,
     req.body.status_id,
   ];
 
@@ -371,7 +404,7 @@ app.get("/task_priorities", (req, res) => {
 
 app.post("/tasks", (req, res) => {
   const q =
-    "INSERT INTO tasks (`project_id`, `title`, `description`, `start_date`, `end_date`, `priority_id`, `status_id`) VALUES (?)";
+    "INSERT INTO tasks (`project_id`, `title`, `description`, `start_date`, `end_date`, `actual_end_date`, `priority_id`, `status_id`) VALUES (?)";
 
   const values = [
     req.body.project_id,
@@ -379,6 +412,7 @@ app.post("/tasks", (req, res) => {
     req.body.description,
     req.body.start_date,
     req.body.end_date,
+    req.body.actual_end_date,
     req.body.priority_id,
     req.body.status_id,
   ];
@@ -402,7 +436,7 @@ app.delete("/tasks/:id", (req, res) => {
 app.put("/tasks/:id", (req, res) => {
   const taskId = req.params.id;
   const q =
-    "UPDATE tasks SET `project_id` = ?, `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `priority_id`=?, `status_id`=? WHERE id =?";
+    "UPDATE tasks SET `project_id` = ?, `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `actual_end_date`=?,`priority_id`=?, `status_id`=?, `rating`=? WHERE id =?";
 
   const values = [
     req.body.project_id,
@@ -410,9 +444,12 @@ app.put("/tasks/:id", (req, res) => {
     req.body.description,
     req.body.start_date,
     req.body.end_date,
+    req.body.actual_end_date,
     req.body.priority_id,
     req.body.status_id,
+    req.body.rating,
   ];
+  
 
   db.query(q, [...values, taskId], (err, data) => {
     if (err) return res.json(err);
@@ -670,18 +707,24 @@ app.put("/users/:id", (req, res) => {
 app.get("/userdetails/:id", (req, res) => {
   const userId = req.params.id;
   const q = `
-        SELECT 
+         SELECT 
             users.id AS user_id,
             users.name AS user_name,
             tasks.title AS task_title,
             tasks.start_date,
-            tasks.end_date
+            tasks.end_date,
+            tasks.actual_end_date,
+            assignments.assigned_date,
+            task_priorities.id AS task_priorities_id,
+            tasks.rating AS task_rating
         FROM 
             users
         JOIN 
             assignments ON users.id = assignments.user_id
         JOIN 
             tasks ON assignments.task_id = tasks.id
+        JOIN 
+            task_priorities ON task_priorities.id = tasks.priority_id
         WHERE 
             users.id = ?
     `;
@@ -1170,6 +1213,7 @@ app.get("/comments/count", (req, res) => {
 
 const messageSchema = new mongoose.Schema({
   userId: Number,
+  userName: String,
   chatId: String,
   message: String,
   timestamp: Date,
@@ -1213,6 +1257,8 @@ app.get("/api/messages", async (req, res) => {
 
       res.json(messages.map(msg => ({
           id: msg._id,
+          userName: msg.userName, 
+          userName: msg.userName, // Отримуємо userName з MongoDB
           userId: msg.userId,
           message: msg.message,
           time: msg.timestamp ? msg.timestamp.toISOString() : "No time",
@@ -1222,6 +1268,8 @@ app.get("/api/messages", async (req, res) => {
                   : "Deleted"
               : null,
       })));
+
+      console.log(messages)
 
   } catch (err) {
       console.error("Error fetching messages:", err);
@@ -1236,9 +1284,10 @@ app.get("/api/messages", async (req, res) => {
 // Додавання нового повідомлення
 app.post("/api/messages", async (req, res) => {
   try {
-      const { userId, message, replyTo } = req.body;
+      const { userId, userName, message, replyTo } = req.body;
       const newMessage = new Message({
           userId,
+          userName, // Зберігаємо userName
           message,
           replyTo: replyTo || null,
           timestamp: new Date().toISOString()
@@ -1315,6 +1364,53 @@ io.on("connection", (socket) => {
     console.log("A user disconnected");
   });
 });
+
+//----------------------- statistics STATISTICS ---------------------------
+
+app.get("/api/communication-stats", async (req, res) => {
+  try {
+    // SQL-запит для об'єднання постів і коментарів
+    const combinedQuery = `
+      SELECT id, user_id, created_time AS timestamp, 'post' AS type FROM posts
+      UNION ALL
+      SELECT id, user_id, created_time AS timestamp, 'comment' AS type FROM comments
+      ORDER BY timestamp;
+    `;
+
+    // Виконання SQL-запиту з використанням Promise
+    const sqlResults = await new Promise((resolve, reject) => {
+      db.query(combinedQuery, (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    // Отримання повідомлень з MongoDB
+    const messages = await Message.find({}, "_id userId timestamp").sort({ timestamp: 1 });
+
+    // Об'єднання результатів
+    const stats = [
+      ...sqlResults.map(row => ({
+        id: row.id,
+        userId: row.user_id,
+        timestamp: row.timestamp,
+        type: row.type
+      })),
+      ...messages.map(m => ({
+        id: m._id,
+        userId: m.userId,
+        timestamp: m.timestamp,
+        type: "message"
+      }))
+    ];
+
+    res.json(stats);
+  } catch (err) {
+    console.error("Error fetching communication stats:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 
 // Порт для сервера
 server.listen(3001, () => {
