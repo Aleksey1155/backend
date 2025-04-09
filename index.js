@@ -12,10 +12,11 @@ import multer from "multer";
 import cookieParser from "cookie-parser";
 import { register } from "./register/checkAuth.js";
 import path from "path";
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 import { Server } from "socket.io";
 import http from "http";
 import { time } from "console";
+import connectToMongoDB from "./databases/connectToMongoDB.js";
 // import cloudinary from "cloudinary";
 // import fs from 'fs';
 
@@ -24,6 +25,7 @@ const __dirname = dirname(__filename);
 
 // ----------    Завантаження змінних середовища  ----------
 dotenv.config();
+const PORT = process.env.PORT || 3001;
 
 const app = express();
 app.use(
@@ -31,7 +33,7 @@ app.use(
     createParentPath: true,
   })
 );
-
+app.use(cookieParser())
 app.use(express.json());
 app.use(cors());
 
@@ -51,7 +53,7 @@ const db = mysql.createConnection({
 // });
 //---------------------- mongoose DB Connection   -----------------------------------
 
-mongoose.connect('mongodb://localhost:27017/chat_database', {
+mongoose.connect("mongodb://localhost:27017/chat_database", {
   // useNewUrlParser: true,
   // useUnifiedTopology: true,
 });
@@ -191,11 +193,12 @@ app.get("/projectdetails/:id", (req, res) => {
   db.query(q, [projectId], (err, data) => {
     if (err) return res.json(err);
     if (data.length === 0)
-      return res.status(404).json({ message: "No tasks found for this project" });
+      return res
+        .status(404)
+        .json({ message: "No tasks found for this project" });
     return res.json(data);
   });
 });
-
 
 app.get("/project_statuses", (req, res) => {
   const q = "SELECT * FROM project_statuses";
@@ -225,7 +228,7 @@ app.post("/projects", (req, res) => {
     req.body.actual_end_date,
     req.body.status_id,
   ];
-  
+
   db.query(q, [values], (err, data) => {
     if (err) return res.json(err);
 
@@ -258,8 +261,6 @@ app.put("/projects/:id", (req, res) => {
   const projectId = req.params.id;
   const q =
     "UPDATE projects SET `title` = ?, `description`=?, `start_date`=?, `end_date`=?, `actual_end_date`=?, `status_id`=? WHERE id =?";
-
-    
 
   const values = [
     req.body.title,
@@ -449,7 +450,6 @@ app.put("/tasks/:id", (req, res) => {
     req.body.status_id,
     req.body.rating,
   ];
-  
 
   db.query(q, [...values, taskId], (err, data) => {
     if (err) return res.json(err);
@@ -750,11 +750,11 @@ app.delete("/users/:id", (req, res) => {
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
-  console.log("Authorization Header:", authHeader);
-  console.log("Extracted Token:", token);
+  // console.log("Authorization Header:", authHeader);
+  // console.log("Extracted Token:", token);
 
   if (!token) {
-    console.log("Токен відсутній");
+    // console.log("Токен відсутній");
     return res.sendStatus(401); // Якщо токен відсутній
   }
 
@@ -833,11 +833,11 @@ app.post("/login", (req, res) => {
 
 //+++++++++++    Маршрут для аутентифікації      ++++++++++++++++++++
 app.get("/me", authenticateToken, (req, res) => {
-  console.log("Запит на маршрут /me");
-  console.log("Інформація про користувача з токену:", req.user);
+  // console.log("Запит на маршрут /me");
+  // console.log("Інформація про користувача з токену:", req.user);
 
   const userId = req.user.id;
-  console.log("ID користувача для SQL-запиту:", userId);
+  // console.log("ID користувача для SQL-запиту:", userId);
   const q = `
         SELECT 
             users.*,  
@@ -853,7 +853,7 @@ app.get("/me", authenticateToken, (req, res) => {
       console.log("Помилка SQL-запиту:", err);
       return res.status(500).json({ message: "Помилка запиту до бази даних" });
     }
-    console.log("Результат SQL-запиту:", data);
+    // console.log("Результат SQL-запиту:", data);
     if (data.length === 0) {
       console.log("Користувача не знайдено в базі даних для ID:", userId);
       return res.status(404).json({ message: "User not found" });
@@ -1148,7 +1148,7 @@ app.delete("/posts/:id", (req, res) => {
 // ---------------------------- Comments ---------------------------------
 
 app.get("/comments", (req, res) => {
-  const { postId } = req.query; 
+  const { postId } = req.query;
 
   if (!postId) {
     return res.status(400).json({ error: "postId is required" });
@@ -1166,7 +1166,6 @@ app.get("/comments", (req, res) => {
     return res.json(data);
   });
 });
-
 
 app.post("/comments", (req, res) => {
   const { description, post_id, user_id } = req.body;
@@ -1213,6 +1212,7 @@ app.get("/comments/count", (req, res) => {
 
 const messageSchema = new mongoose.Schema({
   userId: Number,
+  receiverId: Number,
   userName: String,
   chatId: String,
   message: String,
@@ -1220,89 +1220,88 @@ const messageSchema = new mongoose.Schema({
   replyTo: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
   edited: Boolean,
   attachments: [String],
+  isRead: { type: Boolean, default: false },
 });
 
-const Message = mongoose.model('Message', messageSchema);
-
-
+// const Message = mongoose.model("Message", messageSchema);
 
 app.get("/api/messages", async (req, res) => {
   try {
-      const messages = await Message.find().sort({ timestamp: 1 });
+    const messages = await Message.find().sort({ timestamp: 1 });
 
-      // Отримуємо унікальні ObjectId з поля replyTo
-      const replyToIds = messages
-          .filter(msg => msg.replyTo !== null) // Беремо тільки ті, які не null
-          .map(msg => msg.replyTo); // Витягуємо самі ID
+    // Отримуємо унікальні ObjectId з поля replyTo
+    const replyToIds = messages
+      .filter((msg) => msg.replyTo !== null) // Беремо тільки ті, які не null
+      .map((msg) => msg.replyTo); // Витягуємо самі ID
 
-      // Шукаємо ці ID в БД
-      const existingReplies = await Message.find({ _id: { $in: replyToIds } }, "_id message");
+    // Шукаємо ці ID в БД
+    const existingReplies = await Message.find(
+      { _id: { $in: replyToIds } },
+      "_id message"
+    );
 
-      // Створюємо мапу існуючих ID
-      const replyMap = existingReplies.reduce((acc, msg) => {
-          acc[msg._id] = msg.message;
-          return acc;
-      }, {});
+    // Створюємо мапу існуючих ID
+    const replyMap = existingReplies.reduce((acc, msg) => {
+      acc[msg._id] = msg.message;
+      return acc;
+    }, {});
 
-      // console.log("Fetched Messages:");
-      // messages.forEach(msg => {
-      //     if (msg.replyTo === null) {
-      //         console.log(`Message ID: ${msg._id} | replyTo: NULL (не було відповіді)`);
-      //     } else if (replyMap[msg.replyTo]) {
-      //         console.log(`Message ID: ${msg._id} | replyTo ID: ${msg.replyTo} (ІСНУЄ в БД)`);
-      //     } else {
-      //         console.log(`Message ID: ${msg._id} | replyTo ID: ${msg.replyTo} (ВИДАЛЕНО!)`);
-      //     }
-      // });
+    // console.log("Fetched Messages:");
+    // messages.forEach(msg => {
+    //     if (msg.replyTo === null) {
+    //         console.log(`Message ID: ${msg._id} | replyTo: NULL (не було відповіді)`);
+    //     } else if (replyMap[msg.replyTo]) {
+    //         console.log(`Message ID: ${msg._id} | replyTo ID: ${msg.replyTo} (ІСНУЄ в БД)`);
+    //     } else {
+    //         console.log(`Message ID: ${msg._id} | replyTo ID: ${msg.replyTo} (ВИДАЛЕНО!)`);
+    //     }
+    // });
 
-      res.json(messages.map(msg => ({
-          id: msg._id,
-          userName: msg.userName, 
-          userName: msg.userName, // Отримуємо userName з MongoDB
-          userId: msg.userId,
-          message: msg.message,
-          time: msg.timestamp ? msg.timestamp.toISOString() : "No time",
-          replyTo: msg.replyTo
-              ? replyMap[msg.replyTo] 
-                  ? { id: msg.replyTo, message: replyMap[msg.replyTo] }
-                  : "Deleted"
-              : null,
-      })));
+    res.json(
+      messages.map((msg) => ({
+        id: msg._id,
+        chatId: msg.chatId,
+        userName: msg.userName,
+        userId: msg.userId,
+        receiverId: msg.receiverId,
+        message: msg.message,
+        time: msg.timestamp ? msg.timestamp.toISOString() : "No time",
+        replyTo: msg.replyTo
+          ? replyMap[msg.replyTo]
+            ? { id: msg.replyTo, message: replyMap[msg.replyTo] }
+            : "Deleted"
+          : null,
+      }))
+    );
 
-      console.log(messages)
-
+    // console.log(messages)
   } catch (err) {
-      console.error("Error fetching messages:", err);
-      res.status(500).json({ error: "Internal Server Error" });
+    console.error("Error fetching messages:", err);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
-
-
-
 
 // Додавання нового повідомлення
 app.post("/api/messages", async (req, res) => {
   try {
-      const { userId, userName, message, replyTo } = req.body;
-      const newMessage = new Message({
-          userId,
-          userName, // Зберігаємо userName
-          message,
-          replyTo: replyTo || null,
-          timestamp: new Date().toISOString()
-          // Додаємо дату та час
-      });
+    const { userId, receiverId, chatId, userName, message, replyTo } = req.body;
+    const newMessage = new Message({
+      userId,
+      receiverId,
+      chatId,
+      userName, // Зберігаємо userName
+      message,
+      replyTo: replyTo || null,
+      timestamp: new Date().toISOString(), // Додаємо дату та час
+    });
 
-      await newMessage.save();
-      res.status(201).json(newMessage);
+    await newMessage.save();
+    res.status(201).json(newMessage);
   } catch (err) {
-      console.error("Error saving message:", err);
-      res.status(500).json({ error: "Internal Server Error" });
+    console.error("Error saving message:", err);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
-
 
 // Редагування повідомлення
 app.put("/api/messages/:id", async (req, res) => {
@@ -1339,29 +1338,87 @@ app.delete("/api/messages/:id", async (req, res) => {
   }
 });
 
+//------------------------------- read status (сповіщення)  ------------------------
+app.put("/api/messages/read/:chatId/:userId", async (req, res) => {
+  try {
+    await Message.updateMany(
+      {
+        chatId: req.params.chatId,
+        userId: { $ne: req.params.userId },
+        isRead: false,
+      },
+      { $set: { isRead: true } }
+    );
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("Error updating read status:", err);
+    res.sendStatus(500);
+  }
+});
+
+app.get("/api/messages/unread/:userId", async (req, res) => {
+  const count = await Message.countDocuments({
+    userId: { $ne: req.params.userId },
+    receiverId: { $ne: req.params.receiverId },
+    isRead: false,
+  });
+  res.json({ count });
+});
+
+// ----------------------  Messenger -----------------------------
+
 // ---------------------------  Socket io  -------------------------
 
 const server = http.createServer(app); // Створюємо сервер через http.createServer
 const io = new Server(server, {
   cors: {
     origin: "http://localhost:5173", // URL  фронтенду
-    methods: ["GET", "POST", "PUT", "DELETE"]
-  }
+    methods: ["GET", "POST", "PUT", "DELETE"],
+  },
 }); // Ініціалізуємо socket.io через server
 
 // Налаштування обробки підключення клієнтів
 io.on("connection", (socket) => {
   console.log("A user connected");
 
-  // Обробка події 'message'
-  socket.on("message", (msg) => {
-    console.log("Message received: ", msg);
-    io.emit("message", msg); // Надсилаємо повідомлення всім підключеним клієнтам
+  // Додавання користувача до кімнати
+  socket.on("joinRoom", (userId) => {
+    socket.join(userId); // Користувач потрапляє в кімнату за його userId
+    console.log(`User with ID: ${userId} joined room`);
   });
 
-  // Обробка відключення
-  socket.on("disconnect", () => {
-    console.log("A user disconnected");
+  socket.on("markMessagesAsRead", ({ chatId, userId }) => {
+    console.log(`Messages in chat ${chatId} marked as read by user ${userId}`);
+
+    // 🔔 Повідомляємо всіх, а не лише того, хто прочитав
+    io.emit("messagesRead", { chatId, userId });
+  });
+  // Обробка події 'message'
+  // Backend (Socket.io - message event)
+  socket.on("message", (msg) => {
+    console.log("Message received: ", msg);
+
+    const senderId = msg.userId;
+    const targetUserId = msg.receiverId;
+
+    console.log("Sending notification to user", targetUserId);
+
+    io.to(targetUserId).emit("notification", {
+      receiverId: msg.receiverId,
+      userId: msg.userId,
+      userName: msg.userName,
+      chatId: msg.chatId,
+      message: msg.message,
+      timestamp: new Date(),
+      isRead: false,
+      replyTo: msg.replyTo,
+      attachments: msg.attachments,
+      _id: msg._id,
+      __v: msg.__v,
+      id: msg.id,
+    });
+
+    io.emit("message", msg);
   });
 });
 
@@ -1386,22 +1443,24 @@ app.get("/api/communication-stats", async (req, res) => {
     });
 
     // Отримання повідомлень з MongoDB
-    const messages = await Message.find({}, "_id userId timestamp").sort({ timestamp: 1 });
+    const messages = await Message.find({}, "_id userId timestamp").sort({
+      timestamp: 1,
+    });
 
     // Об'єднання результатів
     const stats = [
-      ...sqlResults.map(row => ({
+      ...sqlResults.map((row) => ({
         id: row.id,
         userId: row.user_id,
         timestamp: row.timestamp,
-        type: row.type
+        type: row.type,
       })),
-      ...messages.map(m => ({
+      ...messages.map((m) => ({
         id: m._id,
         userId: m.userId,
         timestamp: m.timestamp,
-        type: "message"
-      }))
+        type: "message",
+      })),
     ];
 
     res.json(stats);
@@ -1411,8 +1470,18 @@ app.get("/api/communication-stats", async (req, res) => {
   }
 });
 
+// ------------------------- new chat wiht mongoDB  -----------------------------------
+
+import authRoutes from "./routes/auth.routes.js";
+import messageRoutes from "./routes/message.routes.js";
+import userRoutes from "./routes/user.routes.js";
+
+app.use("/api/auth/", authRoutes);
+app.use("/api/messages/", messageRoutes);
+app.use("/api/users/", userRoutes);
 
 // Порт для сервера
-server.listen(3001, () => {
-  console.log("Server running on http://localhost:3001");
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  connectToMongoDB();
 });
