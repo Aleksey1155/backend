@@ -33,7 +33,7 @@ app.use(
     createParentPath: true,
   })
 );
-app.use(cookieParser())
+app.use(cookieParser());
 app.use(express.json());
 app.use(cors());
 
@@ -53,10 +53,10 @@ const db = mysql.createConnection({
 // });
 //---------------------- mongoose DB Connection   -----------------------------------
 
-mongoose.connect("mongodb://localhost:27017/chat_database", {
-  // useNewUrlParser: true,
-  // useUnifiedTopology: true,
-});
+// mongoose.connect("mongodb://localhost:27017/social_platform", {
+//   // useNewUrlParser: true,
+//   // useUnifiedTopology: true,
+// });
 
 app.get("/", (req, res) => {
   res.json("hello");
@@ -824,7 +824,7 @@ app.post("/login", (req, res) => {
     const token = jwt.sign(
       { id: data[0].id, email: data[0].email, role_name: data[0].role_name }, // Додаємо role_name
       "secretkey", // Секретний ключ для підписання токенів
-      { expiresIn: "8h" } // Термін дії токену
+      { expiresIn: "1d" } // Термін дії токену
     );
 
     return res.json({ token });
@@ -1135,15 +1135,31 @@ app.put("/posts/:id", (req, res) => {
   });
 });
 
-app.delete("/posts/:id", (req, res) => {
+app.delete("/posts/:id", async (req, res) => {
   const postId = req.params.id;
-  const q = "DELETE FROM posts WHERE id = ?";
 
-  db.query(q, [postId], (err, data) => {
-    if (err) return res.json(err);
-    return res.json("Post has been deleted");
-  });
+  try {
+    // 1. Видаляємо лайки з MongoDB
+    await Like.deleteMany({ entityId: postId, type: 'post' });
+    console.log("Лайки видалено");
+
+    // 2. Видаляємо пост з MySQL
+    const query = "DELETE FROM posts WHERE id = ?";
+    db.query(query, [postId], (err, result) => {
+      if (err) {
+        console.error("Помилка при видаленні посту з MySQL:", err);
+        return res.status(500).json({ error: "Error deleting post from MySQL" });
+      }
+
+      // Повертаємо успішну відповідь
+      res.json({ message: "Post and likes have been deleted successfully" });
+    });
+  } catch (err) {
+    console.error("Помилка при видаленні лайків або посту:", err);
+    return res.status(500).json({ error: "Error deleting likes from MongoDB or post from MySQL" });
+  }
 });
+
 
 // ---------------------------- Comments ---------------------------------
 
@@ -1208,6 +1224,171 @@ app.get("/comments/count", (req, res) => {
   });
 });
 
+// -------------------------  likes  -----------------------------------
+const likeSchema = new mongoose.Schema({
+  toUserId: Number, // автор посту/коментаря
+  fromUserId: {
+    type: Number,
+    required: true,
+  },
+  type: {
+    type: String,
+    enum: ["post", "comment"],
+    required: true,
+  },
+  entityId: {
+    type: Number,
+    required: true,
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+likeSchema.index({ entityId: 1, type: 1 });
+likeSchema.index({ fromUserId: 1, entityId: 1, type: 1 }, { unique: true });
+
+const Like = mongoose.model("Like", likeSchema);
+
+app.get("/api/likes", async (req, res) => {
+  try {
+    const likes = await Like.find();
+
+    res.json(
+      likes.map((like) => ({
+        id: like._id,
+        toUserId: like.toUserId,
+        fromUserId: like.fromUserId,
+        type: like.type,
+        entityId: like.entityId,
+        time: like.timestamp ? like.timestamp.toISOString() : "No time",
+      }))
+    );
+  } catch (err) {
+    console.error("Error fetching general messages:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post("/api/likes", async (req, res) => {
+  try {
+    const { toUserId, fromUserId, type, entityId } = req.body;
+
+    const existing = await Like.findOne({ fromUserId, type, entityId });
+
+    if (existing) {
+      await existing.deleteOne();
+      const count = await Like.countDocuments({ type, entityId });
+      return res.status(200).json({ liked: false, count });
+    } else {
+      const newLike = new Like({ toUserId, fromUserId, type, entityId });
+      await newLike.save();
+      const count = await Like.countDocuments({ type, entityId });
+      return res.status(201).json({ liked: true, count });
+    }
+  } catch (err) {
+    console.error("Error handling like:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+
+
+// ------------------------- new general_messages wiht mongoDB  -----------------------------------
+
+const generalMessageSchema = new mongoose.Schema({
+  userId: Number,
+  receiverId: Number,
+  chatId: String,
+  userName: String,
+  message: String,
+  replyTo: mongoose.Schema.Types.ObjectId,
+  timestamp: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+const GeneralMessage = mongoose.model("GeneralMessage", generalMessageSchema);
+
+app.get("/api/general-messages", async (req, res) => {
+  try {
+    const messages = await GeneralMessage.find().sort({ timestamp: 1 });
+
+    const replyToIds = messages
+      .filter((msg) => msg.replyTo !== null)
+      .map((msg) => msg.replyTo);
+
+    const existingReplies = await GeneralMessage.find(
+      { _id: { $in: replyToIds } },
+      "_id message"
+    );
+
+    const replyMap = existingReplies.reduce((acc, msg) => {
+      acc[msg._id] = msg.message;
+      return acc;
+    }, {});
+
+    res.json(
+      messages.map((msg) => ({
+        id: msg._id,
+        chatId: msg.chatId,
+        userName: msg.userName,
+        userId: msg.userId,
+        receiverId: msg.receiverId,
+        message: msg.message,
+        time: msg.timestamp ? msg.timestamp.toISOString() : "No time",
+        replyTo: msg.replyTo
+          ? replyMap[msg.replyTo]
+            ? { id: msg.replyTo, message: replyMap[msg.replyTo] }
+            : "Deleted"
+          : null,
+      }))
+    );
+  } catch (err) {
+    console.error("Error fetching general messages:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.put("/api/general-messages/:id", async (req, res) => {
+  try {
+    const { message } = req.body;
+    const updatedGeneralMessage = await GeneralMessage.findByIdAndUpdate(
+      req.params.id,
+      { message },
+      { new: true }
+    );
+    if (updatedGeneralMessage) {
+      io.emit("message_updated", updatedGeneralMessage);
+      res.json({ message: "Message updated successfully" });
+    } else {
+      res.status(404).send("Message not found");
+    }
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+});
+
+// Видалення повідомлення
+app.delete("/api/general-messages/:id", async (req, res) => {
+  try {
+    const deletedGeneralMessage = await GeneralMessage.findByIdAndDelete(
+      req.params.id
+    );
+    if (deletedGeneralMessage) {
+      io.emit("message_deleted", req.params.id); // Розсилка оновлення через Socket.io
+      res.json({ message: "Message deleted successfully" });
+    } else {
+      res.status(404).send("Message not found");
+    }
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+});
+
 // -------------------------------  chat MongoBD  -----------------------------
 
 const messageSchema = new mongoose.Schema({
@@ -1223,7 +1404,7 @@ const messageSchema = new mongoose.Schema({
   isRead: { type: Boolean, default: false },
 });
 
-// const Message = mongoose.model("Message", messageSchema);
+const Message = mongoose.model("Message", messageSchema);
 
 app.get("/api/messages", async (req, res) => {
   try {
@@ -1285,15 +1466,23 @@ app.get("/api/messages", async (req, res) => {
 app.post("/api/messages", async (req, res) => {
   try {
     const { userId, receiverId, chatId, userName, message, replyTo } = req.body;
-    const newMessage = new Message({
+
+    const data = {
       userId,
       receiverId,
       chatId,
-      userName, // Зберігаємо userName
+      userName,
       message,
       replyTo: replyTo || null,
-      timestamp: new Date().toISOString(), // Додаємо дату та час
-    });
+      timestamp: new Date().toISOString(),
+    };
+
+    let newMessage;
+    if (chatId === "general_chat") {
+      newMessage = new GeneralMessage(data);
+    } else {
+      newMessage = new Message(data);
+    }
 
     await newMessage.save();
     res.status(201).json(newMessage);
@@ -1357,12 +1546,43 @@ app.put("/api/messages/read/:chatId/:userId", async (req, res) => {
 });
 
 app.get("/api/messages/unread/:userId", async (req, res) => {
-  const count = await Message.countDocuments({
-    userId: { $ne: req.params.userId },
-    receiverId: { $ne: req.params.receiverId },
-    isRead: false,
-  });
-  res.json({ count });
+  try {
+    const userId = req.params.userId;
+
+    const count = await Message.countDocuments({
+      receiverId: userId,
+      isRead: false,
+    });
+
+    res.json({ count });
+  } catch (error) {
+    console.error("Error counting unread messages:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Наприклад, такий
+app.get("/api/messages/unread-by-chat/:userId", async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    console.log("Getting unread counts for user:", userId);
+
+    const unreadCounts = await Message.aggregate([
+      { $match: { receiverId: parseInt(userId), isRead: false } },
+      { $group: { _id: "$chatId", count: { $sum: 1 } } },
+    ]);
+
+    console.log("Unread counts for user:", unreadCounts);
+
+    if (unreadCounts.length === 0) {
+      res.status(404).json({ message: "No unread messages found" });
+    } else {
+      res.json(unreadCounts);
+    }
+  } catch (err) {
+    console.error("Error fetching unread counts:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // ----------------------  Messenger -----------------------------
@@ -1391,10 +1611,20 @@ io.on("connection", (socket) => {
     console.log(`Messages in chat ${chatId} marked as read by user ${userId}`);
 
     // 🔔 Повідомляємо всіх, а не лише того, хто прочитав
-    io.emit("messagesRead", { chatId, userId });
+    // io.emit("messagesRead", { chatId, userId });
   });
   // Обробка події 'message'
   // Backend (Socket.io - message event)
+
+  socket.on("messagesRead", ({ chatId, userId, unreadCountInChat }) => {
+    console.log(
+      `User ${userId} has read messages in chat ${chatId}, unreadCountInChat: ${unreadCountInChat}`
+    );
+
+    // Надсилаємо назад клієнту
+    io.to(userId).emit("messagesRead", { userId, unreadCountInChat });
+  });
+
   socket.on("message", (msg) => {
     console.log("Message received: ", msg);
 
@@ -1417,7 +1647,7 @@ io.on("connection", (socket) => {
       __v: msg.__v,
       id: msg.id,
     });
-
+    console.log("Message received!!!: ", msg);
     io.emit("message", msg);
   });
 });
@@ -1472,13 +1702,13 @@ app.get("/api/communication-stats", async (req, res) => {
 
 // ------------------------- new chat wiht mongoDB  -----------------------------------
 
-import authRoutes from "./routes/auth.routes.js";
-import messageRoutes from "./routes/message.routes.js";
-import userRoutes from "./routes/user.routes.js";
+// import authRoutes from "./routes/auth.routes.js";
+// import messageRoutes from "./routes/message.routes.js";
+// import userRoutes from "./routes/user.routes.js";
 
-app.use("/api/auth/", authRoutes);
-app.use("/api/messages/", messageRoutes);
-app.use("/api/users/", userRoutes);
+// app.use("/api/auth/", authRoutes);
+// app.use("/api/messages/", messageRoutes);
+// app.use("/api/users/", userRoutes);
 
 // Порт для сервера
 server.listen(PORT, () => {

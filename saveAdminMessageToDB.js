@@ -1,3 +1,4 @@
+//файл saveAdminMessageToDB.js
 import mongoose from "mongoose";
 
 const messageSchema = new mongoose.Schema({
@@ -8,8 +9,7 @@ const messageSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-// Перевіряємо, чи модель вже існує
-const Message = mongoose.models.Message || mongoose.model("Message", messageSchema);
+const Message = mongoose.model("Message", messageSchema);
 
-export default Message;
+export default Message; 
 
