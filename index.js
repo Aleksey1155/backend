@@ -35,7 +35,15 @@ app.use(
 );
 app.use(cookieParser());
 app.use(express.json());
-app.use(cors());
+
+
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  })
+);
+
 
 //---------------------- DB Connection   -----------------------------------
 
@@ -1076,12 +1084,75 @@ app.post("/posts", (req, res) => {
     req.body.user_id,
   ];
 
-  db.query(q, values, (err, data) => {
+  db.query(q, values, async (err, data) => {
     if (err) {
-      console.error("Error inserting post:", err);
+      console.error(" Error inserting post:", err);
       return res.status(500).json({ error: "Database error" });
     }
-    return res.status(201).json({ insertId: data.insertId });
+
+    const insertedPostId = data.insertId;
+
+    // Отримаємо всіх користувачів крім адміна
+    db.query("SELECT id, name FROM users WHERE id != 1", async (err, users) => {
+      if (err) {
+        console.error(" Error fetching users:", err);
+        return res.status(500).json({ error: "Error fetching users" });
+      }
+
+      // Отримаємо автора поста для імені в повідомленні
+      db.query(
+        "SELECT name FROM users WHERE id = ?",
+        [req.body.user_id],
+        async (err, result) => {
+          if (err || result.length === 0) {
+            console.error(" Error fetching author name:", err);
+            return res.status(500).json({ error: "Author not found" });
+          }
+
+          const authorName = result[0].name;
+
+          try {
+            // Обрізаємо повідомлення
+            const rawMessage = `Від ${authorName} в соцмережі новий пост: "${
+              req.body.description || "Без опису"
+            }"`;
+            const shortMessage =
+              rawMessage.length > 200
+                ? rawMessage.slice(0, 197) + "..."
+                : rawMessage;
+
+            const notifications = users.map((user) => ({
+              userId: 1, // адмін
+              receiverId: user.id,
+              userName: "post", // тип
+              chatId: `1_${user.id}`,
+              message: shortMessage, // обрізане повідомлення
+              entityId: insertedPostId,
+              timestamp: new Date(),
+              replyTo: null,
+              edited: false,
+              attachments: [],
+              isRead: false,
+            }));
+
+            await Message.insertMany(notifications);
+
+            // Надсилаємо через сокет кожному користувачу
+            notifications.forEach((notif) => {
+              io.to(notif.receiverId).emit("notification", notif);
+            });
+
+            console.log(
+              " Notifications inserted for all users (excluding admin)", notifications
+            );
+            return res.status(201).json({ insertId: insertedPostId });
+          } catch (e) {
+            console.error(" Error inserting notifications:", e);
+            return res.status(500).json({ error: "Notification insert error" });
+          }
+        }
+      );
+    });
   });
 });
 
@@ -1140,15 +1211,20 @@ app.delete("/posts/:id", async (req, res) => {
 
   try {
     // 1. Видаляємо лайки з MongoDB
-    await Like.deleteMany({ entityId: postId, type: 'post' });
+    await Like.deleteMany({ entityId: postId, type: "post" });
     console.log("Лайки видалено");
+
+    await Message.deleteMany({ userName: "post", entityId: Number(postId) });
+    console.log("Повідомлення видалено");
 
     // 2. Видаляємо пост з MySQL
     const query = "DELETE FROM posts WHERE id = ?";
     db.query(query, [postId], (err, result) => {
       if (err) {
         console.error("Помилка при видаленні посту з MySQL:", err);
-        return res.status(500).json({ error: "Error deleting post from MySQL" });
+        return res
+          .status(500)
+          .json({ error: "Error deleting post from MySQL" });
       }
 
       // Повертаємо успішну відповідь
@@ -1156,10 +1232,11 @@ app.delete("/posts/:id", async (req, res) => {
     });
   } catch (err) {
     console.error("Помилка при видаленні лайків або посту:", err);
-    return res.status(500).json({ error: "Error deleting likes from MongoDB or post from MySQL" });
+    return res
+      .status(500)
+      .json({ error: "Error deleting likes from MongoDB or post from MySQL" });
   }
 });
-
 
 // ---------------------------- Comments ---------------------------------
 
@@ -1293,9 +1370,6 @@ app.post("/api/likes", async (req, res) => {
   }
 });
 
-
-
-
 // ------------------------- new general_messages wiht mongoDB  -----------------------------------
 
 const generalMessageSchema = new mongoose.Schema({
@@ -1395,6 +1469,7 @@ const messageSchema = new mongoose.Schema({
   userId: Number,
   receiverId: Number,
   userName: String,
+  entityId: Number,
   chatId: String,
   message: String,
   timestamp: Date,
@@ -1442,6 +1517,7 @@ app.get("/api/messages", async (req, res) => {
       messages.map((msg) => ({
         id: msg._id,
         chatId: msg.chatId,
+        entityId: msg.entityId,
         userName: msg.userName,
         userId: msg.userId,
         receiverId: msg.receiverId,
@@ -1465,12 +1541,14 @@ app.get("/api/messages", async (req, res) => {
 // Додавання нового повідомлення
 app.post("/api/messages", async (req, res) => {
   try {
-    const { userId, receiverId, chatId, userName, message, replyTo } = req.body;
+    const { userId, receiverId, chatId, entityId, userName, message, replyTo } =
+      req.body;
 
     const data = {
       userId,
       receiverId,
       chatId,
+      entityId,
       userName,
       message,
       replyTo: replyTo || null,
@@ -1561,7 +1639,7 @@ app.get("/api/messages/unread/:userId", async (req, res) => {
   }
 });
 
-// Наприклад, такий
+// 
 app.get("/api/messages/unread-by-chat/:userId", async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -1574,16 +1652,14 @@ app.get("/api/messages/unread-by-chat/:userId", async (req, res) => {
 
     console.log("Unread counts for user:", unreadCounts);
 
-    if (unreadCounts.length === 0) {
-      res.status(404).json({ message: "No unread messages found" });
-    } else {
-      res.json(unreadCounts);
-    }
+    // Завжди повертай 200 — навіть якщо порожньо
+    res.status(200).json(unreadCounts);
   } catch (err) {
     console.error("Error fetching unread counts:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
 
 // ----------------------  Messenger -----------------------------
 
