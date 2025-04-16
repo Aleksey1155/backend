@@ -17,6 +17,7 @@ import { Server } from "socket.io";
 import http from "http";
 import { time } from "console";
 import connectToMongoDB from "./databases/connectToMongoDB.js";
+import { promisify } from "util";
 // import cloudinary from "cloudinary";
 // import fs from 'fs';
 
@@ -36,14 +37,12 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
-
 app.use(
   cors({
     origin: "http://localhost:5173",
     credentials: true,
   })
 );
-
 
 //---------------------- DB Connection   -----------------------------------
 
@@ -53,6 +52,8 @@ const db = mysql.createConnection({
   password: "",
   database: "project_management",
 });
+
+const query = promisify(db.query).bind(db);
 
 // cloudinary.v2.config({
 //   cloud_name: "dj2gnypib",
@@ -1036,25 +1037,112 @@ app.get("/news", (req, res) => {
 });
 
 app.post("/news", (req, res) => {
-  try {
+ 
     const q = "INSERT INTO news (`user_id`, `news_text`) VALUES(?)";
     const values = [req.body.user_id, req.body.news_text];
-    db.query(q, [values], (err, data) => {
-      res.json("news text created");
+
+
+    
+    db.query(q, [values], async (err, data) => {
+      if (err) {
+        console.error(" Error inserting post:", err);
+        return res.status(500).json({ error: "Database error" });
+      }
+  
+      const insertedNewsId = data.insertId;
+  
+      // Отримаємо всіх користувачів крім адміна
+      db.query("SELECT id, name FROM users WHERE id != 1", async (err, users) => {
+        if (err) {
+          console.error(" Error fetching users:", err);
+          return res.status(500).json({ error: "Error fetching users" });
+        }
+  
+        // Отримаємо автора поста для імені в повідомленні
+        db.query(
+          "SELECT name FROM users WHERE id = ?",
+          [req.body.user_id],
+          async (err, result) => {
+            if (err || result.length === 0) {
+              console.error(" Error fetching author name:", err);
+              return res.status(500).json({ error: "Author not found" });
+            }
+  
+            const authorName = result[0].name;
+  
+            try {
+              // Обрізаємо повідомлення
+              const rawMessage = `Від <b>${authorName}</b> нова новина: <i>"${
+                req.body.news_text}</i>"`;
+              const shortMessage =
+                rawMessage.length > 200
+                  ? rawMessage.slice(0, 197) + "..."
+                  : rawMessage;
+  
+              const notifications = users.map((user) => ({
+                userId: 1, // адмін
+                receiverId: user.id,
+                userName: "news", // тип
+                chatId: `1_${user.id}`,
+                message: shortMessage, // обрізане повідомлення
+                entityId: insertedNewsId,
+                timestamp: new Date(),
+                replyTo: null,
+                edited: false,
+                attachments: [],
+                isRead: false,
+              }));
+  
+              await Message.insertMany(notifications);
+  
+              // Надсилаємо через сокет кожному користувачу
+              notifications.forEach((notif) => {
+                io.to(notif.receiverId).emit("notification", notif);
+              });
+  
+              console.log(
+                " Notifications inserted for all users (excluding admin)",
+                notifications
+              );
+              return res.status(201).json({ insertId: insertedNewsId });
+            } catch (e) {
+              console.error(" Error inserting notifications:", e);
+              return res.status(500).json({ error: "Notification insert error" });
+            }
+          }
+        );
+      });
     });
-  } catch (err) {
-    res.status(500).json(err);
-  }
 });
 
-app.delete("/news/:id", (req, res) => {
+app.delete("/news/:id", async (req, res) => {
   const newsId = req.params.id;
-  const q = "DELETE FROM news  WHERE id = ?";
 
-  db.query(q, [newsId], (err, data) => {
-    if (err) return res.json(err);
-    return res.json("news has been deleted");
-  });
+  try {
+    // 1. Видаляємо Повідомлення з MongoDB
+
+    await Message.deleteMany({ userName: "news", entityId: Number(newsId) });
+    console.log("Повідомлення видалено");
+
+    // 2. Видаляємо пост з MySQL
+    const query = "DELETE FROM news WHERE id = ?";
+    db.query(query, [newsId], (err, result) => {
+      if (err) {
+        console.error("Помилка при видаленні news з MySQL:", err);
+        return res
+          .status(500)
+          .json({ error: "Error deleting news from MySQL" });
+      }
+
+      // Повертаємо успішну відповідь
+      res.json({ message: "News and message have been deleted successfully" });
+    });
+  } catch (err) {
+    console.error("Помилка при видаленні message або news:", err);
+    return res
+      .status(500)
+      .json({ error: "Error deleting likes from MongoDB or news from MySQL" });
+  }
 });
 
 //-------------------------------    social    ------------------------
@@ -1113,9 +1201,9 @@ app.post("/posts", (req, res) => {
 
           try {
             // Обрізаємо повідомлення
-            const rawMessage = `Від ${authorName} в соцмережі новий пост: "${
+            const rawMessage = `Від <b>${authorName}</b> в соцмережі новий <b>пост</b>: <i>"${
               req.body.description || "Без опису"
-            }"`;
+            }</i>"`;
             const shortMessage =
               rawMessage.length > 200
                 ? rawMessage.slice(0, 197) + "..."
@@ -1143,7 +1231,8 @@ app.post("/posts", (req, res) => {
             });
 
             console.log(
-              " Notifications inserted for all users (excluding admin)", notifications
+              " Notifications inserted for all users (excluding admin)",
+              notifications
             );
             return res.status(201).json({ insertId: insertedPostId });
           } catch (e) {
@@ -1207,36 +1296,57 @@ app.put("/posts/:id", (req, res) => {
 });
 
 app.delete("/posts/:id", async (req, res) => {
-  const postId = req.params.id;
+  const postId = Number(req.params.id);
 
   try {
-    // 1. Видаляємо лайки з MongoDB
+    // 1. Видаляємо лайки до поста з MongoDB
     await Like.deleteMany({ entityId: postId, type: "post" });
-    console.log("Лайки видалено");
+    await Message.deleteMany({ userName: "post", entityId: postId });
+    console.log("Лайки та повідомлення до поста видалено");
 
-    await Message.deleteMany({ userName: "post", entityId: Number(postId) });
-    console.log("Повідомлення видалено");
-
-    // 2. Видаляємо пост з MySQL
-    const query = "DELETE FROM posts WHERE id = ?";
-    db.query(query, [postId], (err, result) => {
+    // 2. Отримуємо всі коментарі до поста з MySQL
+    const commentQuery = "SELECT id FROM comments WHERE post_id = ?";
+    db.query(commentQuery, [postId], async (err, comments) => {
       if (err) {
-        console.error("Помилка при видаленні посту з MySQL:", err);
-        return res
-          .status(500)
-          .json({ error: "Error deleting post from MySQL" });
+        console.error("Помилка при отриманні коментарів:", err);
+        return res.status(500).json({ error: "Error fetching comments" });
       }
 
-      // Повертаємо успішну відповідь
-      res.json({ message: "Post and likes have been deleted successfully" });
+      const commentIds = comments.map((c) => c.id);
+
+      if (commentIds.length > 0) {
+        // 3. Видаляємо лайки та повідомлення до коментарів у MongoDB
+        await Like.deleteMany({ entityId: { $in: commentIds }, type: "comment" });
+        await Message.deleteMany({ userName: "comment", entityId: { $in: commentIds } });
+        console.log("Лайки та повідомлення до коментарів видалено");
+
+        // 4. Видаляємо коментарі з MySQL
+        const deleteCommentsQuery = "DELETE FROM comments WHERE post_id = ?";
+        db.query(deleteCommentsQuery, [postId], (err) => {
+          if (err) {
+            console.error("Помилка при видаленні коментарів:", err);
+            return res.status(500).json({ error: "Error deleting comments" });
+          }
+        });
+      }
+
+      // 5. Видаляємо пост з MySQL
+      const deletePostQuery = "DELETE FROM posts WHERE id = ?";
+      db.query(deletePostQuery, [postId], (err) => {
+        if (err) {
+          console.error("Помилка при видаленні поста:", err);
+          return res.status(500).json({ error: "Error deleting post" });
+        }
+
+        res.json({ message: "Пост, коментарі, лайки і повідомлення видалені успішно" });
+      });
     });
   } catch (err) {
-    console.error("Помилка при видаленні лайків або посту:", err);
-    return res
-      .status(500)
-      .json({ error: "Error deleting likes from MongoDB or post from MySQL" });
+    console.error("Загальна помилка при видаленні:", err);
+    return res.status(500).json({ error: "Server error during deletion" });
   }
 });
+
 
 // ---------------------------- Comments ---------------------------------
 
@@ -1279,7 +1389,93 @@ app.post("/comments", (req, res) => {
       console.error("Database error:", err);
       return res.status(500).json({ error: "Database error" });
     }
-    return res.status(201).json({ message: "Comment has been created" });
+
+    const insertedCommentId = data.insertId;
+
+    // Отримаємо всіх користувачів крім адміна
+    db.query("SELECT id, name FROM users WHERE id != 1", async (err, users) => {
+      if (err) {
+        console.error("Error fetching users:", err);
+        return res.status(500).json({ error: "Error fetching users" });
+      }
+
+      // Отримаємо автора коментаря
+      db.query(
+        "SELECT name FROM users WHERE id = ?",
+        [user_id],
+        (err, resultUser) => {
+          if (err || resultUser.length === 0) {
+            console.error("Error fetching author name:", err);
+            return res.status(500).json({ error: "Author not found" });
+          }
+
+          const authorName = resultUser[0].name;
+
+          // Отримаємо опис поста
+          db.query(
+            "SELECT description FROM posts WHERE id = ?",
+            [post_id],
+            async (err, resultPost) => {
+              if (err || resultPost.length === 0) {
+                console.error("Error fetching post description:", err);
+                return res
+                  .status(500)
+                  .json({ error: "Post description not found" });
+              }
+
+              const postDescription = resultPost[0].description;
+
+              const shortPostDescription =
+                postDescription.length > 100
+                  ? postDescription.slice(0, 97) + "..."
+                  : postDescription;
+
+              const shortDescription =
+                description.length > 100
+                  ? description.slice(0, 97) + "..."
+                  : description;
+
+              try {
+                // Створення повідомлення
+                const rawMessage = `Від <b> ${authorName}</b> новий <b>коментар</b>:<br/> "<i>${shortDescription}</i>"<br/> <b>пост в соцмережі:</b><br/>"<i>${shortPostDescription}</i>"`;
+
+                const notifications = users.map((user) => ({
+                  userId: 1, // адмін
+                  receiverId: user.id,
+                  userName: "comment", // тип
+                  chatId: `1_${user.id}`,
+                  message: rawMessage,
+                  entityId: insertedCommentId,
+                  timestamp: new Date(),
+                  replyTo: null,
+                  edited: false,
+                  attachments: [],
+                  isRead: false,
+                }));
+
+                await Message.insertMany(notifications);
+
+                // Надсилаємо через сокет кожному користувачу
+                notifications.forEach((notif) => {
+                  io.to(notif.receiverId).emit("notification", notif);
+                });
+
+                console.log(
+                  "Notifications inserted for all users (excluding admin)",
+                  notifications
+                );
+                return res.status(201).json({ insertId: insertedCommentId });
+              } catch (e) {
+                console.error("Error inserting notifications:", e);
+                return res
+                  .status(500)
+                  .json({ error: "Notification insert error" });
+              }
+            }
+          );
+        }
+      );
+    });
   });
 });
 
@@ -1299,6 +1495,34 @@ app.get("/comments/count", (req, res) => {
     }
     return res.json({ count: data[0].count });
   });
+});
+
+app.delete("/comments/:id", async (req, res) => {
+  const commentId = Number(req.params.id);
+  try {
+    await Like.deleteMany({ entityId: commentId, type: "comment" });
+    console.log("Лайки видалено");
+
+    await Message.deleteMany({ userName: "comment", entityId: commentId });
+    console.log("Повідомлення видалено");
+
+    const q = "DELETE FROM comments WHERE id = ?";
+    db.query(q, [commentId], (err, data) => {
+      if (err) {
+        console.error("Помилка при видаленні comment з MySQL:", err);
+        return res
+          .status(500)
+          .json({ error: "Error deleting comment from MySQL" });
+      }
+
+      res.json({ message: "comment and likes have been deleted successfully" });
+    });
+  } catch (err) {
+    console.error("Помилка при видаленні лайків або comment:", err);
+    return res.status(500).json({
+      error: "Error deleting likes from MongoDB or comment from MySQL",
+    });
+  }
 });
 
 // -------------------------  likes  -----------------------------------
@@ -1639,7 +1863,7 @@ app.get("/api/messages/unread/:userId", async (req, res) => {
   }
 });
 
-// 
+//
 app.get("/api/messages/unread-by-chat/:userId", async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -1659,7 +1883,6 @@ app.get("/api/messages/unread-by-chat/:userId", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 // ----------------------  Messenger -----------------------------
 
@@ -1776,17 +1999,49 @@ app.get("/api/communication-stats", async (req, res) => {
   }
 });
 
-// ------------------------- new chat wiht mongoDB  -----------------------------------
+// ------------------------- search MySQL  -----------------------------------
 
-// import authRoutes from "./routes/auth.routes.js";
-// import messageRoutes from "./routes/message.routes.js";
-// import userRoutes from "./routes/user.routes.js";
+app.get("/api/search", async (req, res) => {
+  const q = req.query.q;
+  if (!q) return res.json([]);
 
-// app.use("/api/auth/", authRoutes);
-// app.use("/api/messages/", messageRoutes);
-// app.use("/api/users/", userRoutes);
+  const searchTerm = `%${q}%`;
 
-// Порт для сервера
+  try {
+    const users = await query(
+      "SELECT id, name AS title, 'user' AS type FROM users WHERE name LIKE ? OR email LIKE ? OR phone LIKE ?",
+      [searchTerm, searchTerm, searchTerm]
+    );
+    
+    const projects = await query(
+      `SELECT id, title AS title, 'project' AS type
+       FROM projects
+       WHERE title LIKE ? OR description LIKE ?`,
+      [searchTerm, searchTerm]
+    );
+    
+    const tasks = await query(
+      `SELECT id, title AS title, 'task' AS type
+       FROM tasks
+       WHERE title LIKE ? OR description LIKE ?`,
+      [searchTerm, searchTerm]
+    );
+    
+  
+    
+
+    const allResults = [...users, ...projects, ...tasks];
+    res.json(allResults);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Search failed" });
+  }
+});
+
+
+
+
+
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   connectToMongoDB();
