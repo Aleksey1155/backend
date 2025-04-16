@@ -19,7 +19,7 @@ import { time } from "console";
 import connectToMongoDB from "./databases/connectToMongoDB.js";
 import { promisify } from "util";
 // import cloudinary from "cloudinary";
-// import fs from 'fs';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,12 +29,22 @@ dotenv.config();
 const PORT = process.env.PORT || 3001;
 
 const app = express();
+
+
 app.use(
   fileUpload({
     createParentPath: true,
   })
 );
+
+
+
+const storage = multer.memoryStorage(); // ⬅️ Зберігати в оперативці
+const upload = multer({ storage: storage });
+
+
 app.use(cookieParser());
+
 app.use(express.json());
 
 app.use(
@@ -75,8 +85,8 @@ app.get("/", (req, res) => {
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.EMAIL,
-    pass: process.env.EMAILPASSWORD,
+    user: process.env.EMAIL_SYSTEM,
+    pass: process.env.EMAILPASSWORD_SYSTEM,
   },
 });
 
@@ -1525,6 +1535,147 @@ app.delete("/comments/:id", async (req, res) => {
   }
 });
 
+// ---------------------------------  STORIES ----------------------------
+
+app.post("/stories", (req, res) => {
+  const q =
+    "INSERT INTO stories (`description`, `video`, `user_id`, `created_at`, `expires_at`) VALUES (?, ?, ?, NOW(), ?)";
+
+  const values = [
+    req.body.description || "",
+    req.body.video || "",
+    req.body.user_id,
+    req.body.expires_at,// сюди передаєм дату з фронта
+
+  ];
+
+  db.query(q, values, async (err, data) => {
+    if (err) {
+      console.error(" Error inserting story:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+
+    const insertedStoryId = data.insertId;
+
+    // Отримаємо всіх користувачів крім адміна
+    db.query("SELECT id, name FROM users WHERE id != 1", async (err, users) => {
+      if (err) {
+        console.error(" Error fetching users:", err);
+        return res.status(500).json({ error: "Error fetching users" });
+      }
+
+      // Отримаємо автора поста для імені в повідомленні
+      db.query(
+        "SELECT name FROM users WHERE id = ?",
+        [req.body.user_id],
+        async (err, result) => {
+          if (err || result.length === 0) {
+            console.error(" Error fetching author name:", err);
+            return res.status(500).json({ error: "Author not found" });
+          }
+
+          const authorName = result[0].name;
+
+          try {
+            // Обрізаємо повідомлення
+            const rawMessage = `Від <b>${authorName}</b> в соцмережі нова <b>Story</b>: <i>"${
+              req.body.description || "Без опису"
+            }</i>"`;
+            const shortMessage =
+              rawMessage.length > 200
+                ? rawMessage.slice(0, 197) + "..."
+                : rawMessage;
+
+            const notifications = users.map((user) => ({
+              userId: 1, // адмін
+              receiverId: user.id,
+              userName: "story", // тип
+              chatId: `1_${user.id}`,
+              message: shortMessage, // обрізане повідомлення
+              entityId: insertedStoryId,
+              timestamp: new Date(),
+              replyTo: null,
+              edited: false,
+              attachments: [],
+              isRead: false,
+            }));
+
+            await Message.insertMany(notifications);
+
+            // Надсилаємо через сокет кожному користувачу
+            notifications.forEach((notif) => {
+              io.to(notif.receiverId).emit("notification", notif);
+            });
+
+            console.log(
+              " Notifications inserted for all users (excluding admin)",
+              notifications
+            );
+            return res.status(201).json({ insertId: insertedStoryId });
+          } catch (e) {
+            console.error(" Error inserting notifications:", e);
+            return res.status(500).json({ error: "Notification insert error" });
+          }
+        }
+      );
+    });
+  });
+});
+
+app.post("/upload_story", (req, res) => {
+  console.log("Request files:", req.files);
+
+  if (!req.files || !req.files.files) {
+    return res.status(400).json({ msg: "No files uploaded" });
+  }
+
+  const file = req.files.files;
+  console.log("Uploaded file:", file);
+
+  const allowedTypes = [
+    'video/mp4', 'video/webm', 'video/ogg',
+    'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'
+  ];
+  
+  if (!allowedTypes.includes(file.mimetype)) {
+    return res.status(400).json({ msg: "Unsupported file format" });
+  }
+
+  const uniqueFileName = `${Date.now()}-${file.name}`;
+  const uploadDir = path.join(__dirname, "../client/public/uploads/stories");
+  const filePath = path.join(uploadDir, uniqueFileName);
+
+  // Створити папку, якщо її немає
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  file.mv(filePath, (err) => {
+    if (err) {
+      console.error("File move error:", err);
+      return res.status(500).json({ msg: "Failed to move file" });
+    }
+
+    if (!req.body.storyId) {
+      return res.status(400).json({ msg: "Missing story ID" });
+    }
+
+    const q = "UPDATE stories SET video = ? WHERE id = ?";
+    db.query(q, [`/stories/${uniqueFileName}`, req.body.storyId], (err, data) => {
+      if (err) {
+        console.error("DB Error: ", err);
+        return res.status(500).json({ msg: "Failed to update media in the database" });
+      }
+
+      res.json({
+        msg: "Media uploaded successfully",
+        url: `/uploads/stories/${uniqueFileName}`,
+      });
+    });
+  });
+});
+
+
 // -------------------------  likes  -----------------------------------
 const likeSchema = new mongoose.Schema({
   toUserId: Number, // автор посту/коментаря
@@ -2037,6 +2188,38 @@ app.get("/api/search", async (req, res) => {
     res.status(500).json({ error: "Search failed" });
   }
 });
+
+
+app.post("/api/send-file", async (req, res) => {
+  const { comment, from } = req.body;
+
+  if (!req.files || !req.files.file) {
+    return res.status(400).json({ message: "Файл не отримано" });
+  }
+
+  const file = req.files.file;
+
+  try {
+    await transporter.sendMail({
+      from: `"${from}" <kupchynskyi_o_o@students.pstu.edu>`,
+      to: "euromaster.dn.ua@gmail.com",
+      subject: `Файл від користувача ${from}`,
+      text: `Коментар: ${comment || "Без коментаря"}`,
+      attachments: [
+        {
+          filename: file.name,     //  Назва файлу
+          content: file.data,      //  Вміст з express-fileupload
+        },
+      ],
+    });
+
+    res.status(200).json({ message: "Email надіслано" });
+  } catch (err) {
+    console.error("Помилка при надсиланні:", err);
+    res.status(500).json({ message: "Помилка при надсиланні" });
+  }
+});
+
 
 
 
