@@ -20,6 +20,7 @@ import connectToMongoDB from "./databases/connectToMongoDB.js";
 import { promisify } from "util";
 // import cloudinary from "cloudinary";
 import fs from 'fs';
+import deleteOldStories from "./cronJobs/deleteOldStories.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,7 +39,6 @@ app.use(
 );
 
 
-
 const storage = multer.memoryStorage(); // ⬅️ Зберігати в оперативці
 const upload = multer({ storage: storage });
 
@@ -53,6 +53,8 @@ app.use(
     credentials: true,
   })
 );
+
+deleteOldStories();
 
 //---------------------- DB Connection   -----------------------------------
 
@@ -1537,6 +1539,19 @@ app.delete("/comments/:id", async (req, res) => {
 
 // ---------------------------------  STORIES ----------------------------
 
+app.get("/stories", (req, res) => {
+  const q = `
+    SELECT stories.*, users.name, users.email, users.img AS user_img
+    FROM stories
+    INNER JOIN users ON stories.user_id = users.id
+  `;
+
+  db.query(q, (err, data) => {
+    if (err) return res.json(err);
+    return res.json(data);
+  });
+});
+
 app.post("/stories", (req, res) => {
   const q =
     "INSERT INTO stories (`description`, `video`, `user_id`, `created_at`, `expires_at`) VALUES (?, ?, ?, NOW(), ?)";
@@ -1661,7 +1676,7 @@ app.post("/upload_story", (req, res) => {
     }
 
     const q = "UPDATE stories SET video = ? WHERE id = ?";
-    db.query(q, [`/stories/${uniqueFileName}`, req.body.storyId], (err, data) => {
+    db.query(q, [`/uploads/stories/${uniqueFileName}`, req.body.storyId], (err, data) => {
       if (err) {
         console.error("DB Error: ", err);
         return res.status(500).json({ msg: "Failed to update media in the database" });
