@@ -778,7 +778,7 @@ const authenticateToken = (req, res, next) => {
     // console.log("Токен відсутній");
     return res.sendStatus(401); // Якщо токен відсутній
   }
-
+//add process.env.JWT_SECRET
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
       console.log("Недійсний токен:", err.message);
