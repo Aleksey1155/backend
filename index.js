@@ -771,8 +771,8 @@ app.delete("/users/:id", (req, res) => {
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
-  // console.log("Authorization Header:", authHeader);
-  // console.log("Extracted Token:", token);
+  console.log("Authorization Header:", authHeader);
+  console.log("Extracted Token:", token);
 
   if (!token) {
     // console.log("Токен відсутній");
@@ -854,8 +854,8 @@ app.post("/login", (req, res) => {
 
 //+++++++++++    Маршрут для аутентифікації      ++++++++++++++++++++
 app.get("/me", authenticateToken, (req, res) => {
-  // console.log("Запит на маршрут /me");
-  // console.log("Інформація про користувача з токену:", req.user);
+  console.log("Запит на маршрут /me");
+  console.log("Інформація про користувача з токену:", req.user);
 
   const userId = req.user.id;
   // console.log("ID користувача для SQL-запиту:", userId);
