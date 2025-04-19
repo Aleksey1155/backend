@@ -779,7 +779,7 @@ const authenticateToken = (req, res, next) => {
     return res.sendStatus(401); // Якщо токен відсутній
   }
 
-  jwt.verify(token, "secretkey", (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
       console.log("Недійсний токен:", err.message);
       return res.sendStatus(403); // Якщо токен недійсний
@@ -844,7 +844,7 @@ app.post("/login", (req, res) => {
     // Створення JWT токену з role_name
     const token = jwt.sign(
       { id: data[0].id, email: data[0].email, role_name: data[0].role_name }, // Додаємо role_name
-      "secretkey", // Секретний ключ для підписання токенів
+      process.env.JWT_SECRET, // Секретний ключ для підписання токенів
       { expiresIn: "1d" } // Термін дії токену
     );
 
