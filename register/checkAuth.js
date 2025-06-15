@@ -1,4 +1,4 @@
-import { db } from "../connect/connect.js";
+import db from '../connect/connect.js';
 export const register = (req, res) => {
     const { name, email } = req.body;
   

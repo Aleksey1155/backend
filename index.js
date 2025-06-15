@@ -21,6 +21,8 @@ import { promisify } from "util";
 // import cloudinary from "cloudinary";
 import fs from 'fs';
 import deleteOldStories from "./cronJobs/deleteOldStories.js";
+import projectRoutes  from './routes/projectRoutes.js';
+// import './models/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,7 +31,11 @@ const __dirname = dirname(__filename);
 dotenv.config();
 const PORT = process.env.PORT || 3001;
 
+import './models/index.js'; // просто імпорт, без змінних
+
 const app = express();
+
+
 
 
 app.use(
@@ -39,7 +45,7 @@ app.use(
 );
 
 
-const storage = multer.memoryStorage(); // ⬅️ Зберігати в оперативці
+const storage = multer.memoryStorage(); // Зберігати в оперативці
 const upload = multer({ storage: storage });
 
 
@@ -63,27 +69,18 @@ const db = mysql.createConnection({
   user: "root",
   password: "",
   database: "project_management",
+  charset: 'utf8mb4',
 });
 
 const query = promisify(db.query).bind(db);
 
-// cloudinary.v2.config({
-//   cloud_name: "dj2gnypib",
-//   api_key: "732897359219285",
-//   api_secret: "WU8cy0aG-Vf6Kbt-4epVK-1NYEc",
-// });
-//---------------------- mongoose DB Connection   -----------------------------------
 
-// mongoose.connect("mongodb://localhost:27017/social_platform", {
-//   // useNewUrlParser: true,
-//   // useUnifiedTopology: true,
-// });
 
 app.get("/", (req, res) => {
   res.json("hello");
 });
 
-// --------------   Налаштування Nodemailer   -----------------------
+//  Налаштування Nodemailer 
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
@@ -93,6 +90,9 @@ const transporter = nodemailer.createTransport({
 });
 
 // --------------------       PROJECTS    -------------------------------------
+
+// ТУТ ПИШЕМ 
+app.use("/api", projectRoutes);
 
 app.get("/home", (req, res) => {
   const q = `SELECT 
@@ -138,6 +138,8 @@ ORDER BY
     return res.json(data);
   });
 });
+
+
 
 app.get("/projects", (req, res) => {
   const q = `
@@ -792,6 +794,7 @@ const authenticateToken = (req, res, next) => {
 
 // ++++++++++++++++++ app.post Додавання юзера , Регістрація ++++++++++++++++++
 
+// post Додавання юзера , Регістрація
 app.post("/users", (req, res) => {
   const q =
     "INSERT INTO users (`email`,`password`, `name`, `phone`, `img`, `descr`, `role_id`, `job_id`) VALUES (?)";
@@ -843,7 +846,9 @@ app.post("/login", (req, res) => {
 
     // Створення JWT токену з role_name
     const token = jwt.sign(
-      { id: data[0].id, email: data[0].email, role_name: data[0].role_name }, // Додаємо role_name
+      { id: data[0].id, 
+        email: data[0].email, 
+        role_name: data[0].role_name }, // Додаємо role_name
       process.env.JWT_SECRET, // Секретний ключ для підписання токенів
       { expiresIn: "1d" } // Термін дії токену
     );
@@ -949,12 +954,13 @@ app.post("/assignments", (req, res) => {
 
       const userEmail = userData[0].email;
 
-      //------>    Відправка email  <--------
+      // Відправка email
       const mailOptions = {
         from: "kupchynskyi_o_o@students.pstu.edu",
         to: userEmail,
         subject: "Нове призначення завдання",
-        text: `Вам було призначено нове завдання з ID ${req.body.task_id} на дату ${req.body.assigned_date}.`,
+        text: `Вам було призначено нове завдання з ID ${req.body.task_id} 
+        на дату ${req.body.assigned_date}.`,
       };
 
       transporter.sendMail(mailOptions, (error, info) => {

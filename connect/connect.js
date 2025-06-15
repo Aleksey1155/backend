@@ -1,8 +1,10 @@
 import mysql from "mysql"
 
-export  const db = mysql.createConnection({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database: "project_management",
-  });
+const db = mysql.createConnection({
+  host: "localhost",
+  user: "root",
+  password: "",
+  database: "project_management",
+});
+
+export default db;
